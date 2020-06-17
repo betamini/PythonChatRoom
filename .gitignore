@@ -102,6 +102,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+kivy_venv/
 .env
 .venv
 env/
@@ -127,3 +128,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+
+# Visual studio code
+.vscode/
+
+# Misc
+prev_connect.txt
