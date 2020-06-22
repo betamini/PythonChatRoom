@@ -15,7 +15,7 @@ def connect(ip, port, raw_username, error_callback):
     #client_socket.setblocking(False)
 
     try:
-        client_socket.connect((IP, PORT))
+        client_socket.connect((ip, port))
     except Exception as e:
         error_callback(f"Connection error: {str(e)}")
         return False
