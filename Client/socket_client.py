@@ -3,8 +3,8 @@ import errno
 from threading import Thread
 
 HEADER_LENGTH = 10
-IP = "127.0.0.1"
-PORT = 20030
+#IP = "127.0.0.1"
+#PORT = 20030
 
 client_socket = None
 

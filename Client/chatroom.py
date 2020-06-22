@@ -2,7 +2,6 @@ import kivy
 from kivy.app import App
 from kivy.uix.label import Label
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.screenmanager import ScreenManager, Screen
@@ -12,10 +11,10 @@ import socket_client
 import os
 kivy.require("1.11.1")
 
-class ConnectPage(BoxLayout):
+class ConnectPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.orientation = 'vertical'
+        self.cols = 1
         self.getinfogrid = GridLayout(cols=2)
 
         if os.path.isfile("prev_connect.txt"):
@@ -60,8 +59,8 @@ class ConnectPage(BoxLayout):
         Clock.schedule_once(self.connect, 0.2)
     
     def connect(self, _):
-        ip = int(self.port.text)
-        port = self.ip.text
+        ip = self.ip.text
+        port = int(self.port.text)
         username = self.username.text
 
         if not socket_client.connect(ip, port, username, myapp.error_handler.show_error):
@@ -163,9 +162,10 @@ class ChatPage(GridLayout):
 
         
 
-class InfoPage(BoxLayout):
+class InfoPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.cols = 1
         self.info = Label(halign="center", valign="middle", font_size=30)
         self.info.bind(width=self.update_text_width)
         self.add_widget(self.info)

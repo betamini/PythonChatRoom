@@ -1,19 +1,10 @@
 import socket
 import select
+from threading import Thread
 
 HEADER_LENGTH = 10
-IP = "127.0.0.1"
-PORT = 20030
-
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-server_socket.bind((IP, PORT))
-server_socket.listen()
-
-sockets_list = [server_socket]
-
-clients = {}
+#IP = "127.0.0.1"
+#PORT = 20030
 
 def receive_message(client_socket):
     try:
@@ -27,46 +18,71 @@ def receive_message(client_socket):
     except:
         return False
 
-while True:
-    read_sockets, _, exception_sockets = select.select(sockets_list, [], sockets_list)
+def start_server(ip, port, error_callback, should_run_callable):
+    Thread(target=serve, args=(ip, port, error_callback, should_run_callable), daemon=True).start()
 
-    for notified_socket in read_sockets:
-        if notified_socket is server_socket:
-            client_socket, client_address = server_socket.accept()
+def serve(ip, port, error_callback, should_run_callable):
+    #global clients
+    #global server_socket
+    #global sockets_list
 
-            user = receive_message(client_socket)
-            if user is False:
-                continue
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-            sockets_list.append(client_socket)
+        server_socket.bind((ip, port))
+        server_socket.listen()
 
-            clients[client_socket] = user
+        sockets_list = [server_socket]
+        clients = {}
 
-            print(f"Accepted new connection from {client_address[0]}:{client_address[1]} with username {user['data'].decode('utf-8')}")
-            for client_socket in clients:
-                name = "System".encode("utf-8")
-                name_header = f"{len(name):<{HEADER_LENGTH}}".encode("utf-8")
-                data = f"{user['data'].decode('utf-8')} joind the chatroom".encode("utf-8")
-                data_header = f"{len(data):<{HEADER_LENGTH}}".encode("utf-8")
-                client_socket.send(name_header + name + data_header + data)
-        else:
-            message = receive_message(notified_socket)
+        while should_run_callable():
+            read_sockets, _, exception_sockets = select.select(sockets_list, [], sockets_list)
 
-            if message is False:
-                print(f"Closed connection from {clients[notified_socket]['data'].decode('utf-8')}")
+            for notified_socket in read_sockets:
+                if notified_socket is server_socket:
+                    client_socket, client_address = server_socket.accept()
+
+                    user = receive_message(client_socket)
+                    if user is False:
+                        continue
+
+                    sockets_list.append(client_socket)
+
+                    clients[client_socket] = user
+
+                    print(f"Accepted new connection from {client_address[0]}:{client_address[1]} with username {user['data'].decode('utf-8')}")
+                    for client_socket in clients:
+                        name = "System".encode("utf-8")
+                        name_header = f"{len(name):<{HEADER_LENGTH}}".encode("utf-8")
+                        data = f"{user['data'].decode('utf-8')} joind the chatroom".encode("utf-8")
+                        data_header = f"{len(data):<{HEADER_LENGTH}}".encode("utf-8")
+                        client_socket.send(name_header + name + data_header + data)
+                else:
+                    message = receive_message(notified_socket)
+
+                    if message is False:
+                        print(f"Closed connection from {clients[notified_socket]['data'].decode('utf-8')}")
+                        notified_socket.close()
+                        sockets_list.remove(notified_socket)
+                        del clients[notified_socket]
+                        continue
+                    
+                    user = clients[notified_socket]
+                    print(f"Recieved message from {user['data'].decode('utf-8')}: {message['data'].decode('utf-8')}")
+
+                    for client_socket in clients:
+                        if client_socket != notified_socket:
+                            print(f"Sent message to {clients[client_socket]['data']} containing: {user['header'] + user['data'] + message['header'] + message['data']}")
+                            client_socket.send(user['header'] + user['data'] + message['header'] + message['data'])
+
+            for notified_socket in exception_sockets:
+                print(f"Closed connection from {clients[notified_socket]['data'].decode('utf-8')} as exception")
+                notified_socket.close()
                 sockets_list.remove(notified_socket)
                 del clients[notified_socket]
-                continue
-            
-            user = clients[notified_socket]
-            print(f"Recieved message from {user['data'].decode('utf-8')}: {message['data'].decode('utf-8')}")
-
-            for client_socket in clients:
-                if client_socket != notified_socket:
-                    print(f"Sent message to {clients[client_socket]['data']} containing: {user['header'] + user['data'] + message['header'] + message['data']}")
-                    client_socket.send(user['header'] + user['data'] + message['header'] + message['data'])
-
-    for notified_socket in exception_sockets:
-        print(f"Closed connection from {clients[notified_socket]['data'].decode('utf-8')} as exception")
-        sockets_list.remove(notified_socket)
-        del clients[notified_socket]
+        
+        for client_socket in clients:
+            client_socket.close()
+        
+        del clients
+        del sockets_list

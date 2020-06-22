@@ -135,3 +135,5 @@ dmypy.json
 
 # Misc
 prev_connect.txt
+Test/
+CommandToBuild.txt
