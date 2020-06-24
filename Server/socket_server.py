@@ -6,26 +6,10 @@ HEADER_LENGTH = 10
 #IP = "127.0.0.1"
 #PORT = 20030
 
-def receive_message(client_socket):
-    try:
-        message_header = client_socket.recv(HEADER_LENGTH)
-        
-        if not len(message_header):
-            return False
-        
-        message_length = int(message_header.decode("utf-8").strip())
-        return {"header": message_header, "data": client_socket.recv(message_length)}
-    except:
-        return False
-
 def start_server(ip, port, error_callback, should_run_callable):
     Thread(target=serve, args=(ip, port, error_callback, should_run_callable), daemon=True).start()
 
 def serve(ip, port, error_callback, should_run_callable):
-    #global clients
-    #global server_socket
-    #global sockets_list
-
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -52,19 +36,13 @@ def serve(ip, port, error_callback, should_run_callable):
 
                     print(f"Accepted new connection from {client_address[0]}:{client_address[1]} with username {user['data'].decode('utf-8')}")
                     for client_socket in clients:
-                        name = "System".encode("utf-8")
-                        name_header = f"{len(name):<{HEADER_LENGTH}}".encode("utf-8")
-                        data = f"{user['data'].decode('utf-8')} joind the chatroom".encode("utf-8")
-                        data_header = f"{len(data):<{HEADER_LENGTH}}".encode("utf-8")
-                        client_socket.send(name_header + name + data_header + data)
+                        send(encode("System") + encode(f"{user['data'].decode('utf-8')} joind the chatroom"), client_socket, clients)
                 else:
                     message = receive_message(notified_socket)
 
                     if message is False:
                         print(f"Closed connection from {clients[notified_socket]['data'].decode('utf-8')}")
-                        notified_socket.close()
-                        sockets_list.remove(notified_socket)
-                        del clients[notified_socket]
+                        close_connection(notified_socket, sockets_list, clients)
                         continue
                     
                     user = clients[notified_socket]
@@ -72,17 +50,50 @@ def serve(ip, port, error_callback, should_run_callable):
 
                     for client_socket in clients:
                         if client_socket != notified_socket:
-                            print(f"Sent message to {clients[client_socket]['data']} containing: {user['header'] + user['data'] + message['header'] + message['data']}")
-                            client_socket.send(user['header'] + user['data'] + message['header'] + message['data'])
+                            send(user['header'] + user['data'] + message['header'] + message['data'], client_socket, clients)
 
             for notified_socket in exception_sockets:
                 print(f"Closed connection from {clients[notified_socket]['data'].decode('utf-8')} as exception")
-                notified_socket.close()
-                sockets_list.remove(notified_socket)
-                del clients[notified_socket]
+                close_connection(notified_socket, sockets_list, clients)
         
         for client_socket in clients:
-            client_socket.close()
+            close_connection(client_socket, sockets_list, clients)
         
         del clients
         del sockets_list
+
+def receive_message(client_socket):
+    try:
+        message_header = client_socket.recv(HEADER_LENGTH)
+        
+        if not len(message_header):
+            return False
+        message_length = int(message_header.decode("utf-8").strip())
+        data = client_socket.recv(message_length)
+
+        print(f"Received {message_header + data}")
+
+        return {"header": message_header, "data": data}
+    except:
+        return False
+
+def send(data, to_socket, clients):
+    print(f"Sent message to {clients[to_socket]['data']} containing: {data}")
+    #to_socket.send(data['header'] + data['data'])
+    to_socket.send(data)
+
+def encode(raw_data):
+    data = str(raw_data).encode("utf-8")
+    data_header = f"{len(data):<{HEADER_LENGTH}}".encode("utf-8")
+    return data_header + data
+    #return {"header": data_header, "data": data}
+
+def close_connection(socket_to_close, sockets_list, clients):
+    socket_to_close.close()
+    sockets_list.remove(socket_to_close)
+    user = clients[socket_to_close]
+    del clients[socket_to_close]
+
+    name = encode("System")
+    for client_socket in clients:
+        send(name + encode(f"{user['data'].decode('utf-8')} exited the chatroom"), client_socket, clients)

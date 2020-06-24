@@ -7,6 +7,7 @@ from kivy.uix.button import Button
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
+import pyaudio
 import socket_client
 import os
 kivy.require("1.11.1")
