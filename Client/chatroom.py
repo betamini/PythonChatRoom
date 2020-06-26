@@ -19,12 +19,13 @@ class ConnectPage(GridLayout):
         self.getinfogrid = GridLayout(cols=2)
 
         if os.path.isfile("prev_connect.txt"):
-            with open("prev_connect.txt", "r") as f:
-                prev_ip, prev_port, prev_username = f.read().split(",")
-        else:
-            prev_ip = ""
-            prev_port = ""
-            prev_username = "" 
+            with open("prev_connect.txt", "r", encoding="utf-8") as f:
+                try:
+                    prev_ip, prev_port, prev_username = f.read().split(",")
+                except:
+                    prev_ip = ""
+                    prev_port = ""
+                    prev_username = "" 
 
         self.getinfogrid.add_widget(Label(text="IP:"))
         self.ip = TextInput(multiline=False, text=prev_ip)
@@ -51,7 +52,9 @@ class ConnectPage(GridLayout):
 
         print(f"Attempting to connect to {ip}:{port} as {username}")
 
-        with open("prev_connect.txt", "w") as f:
+        #TODO
+        #store in json file format
+        with open("prev_connect.txt", "w", encoding="utf-8") as f:
             f.write(f"{ip},{port},{username}")
 
         info = f"Attempting to connect to {ip}:{port} as {username}"
@@ -146,10 +149,10 @@ class ChatPage(GridLayout):
     def should_run_callable(self):
         return self.run_state
 
-    def incoming_message_callback(self, username, message):
-        if username == "System":
+    def incoming_message_callback(self, username, message, msg_type):
+        if msg_type == "sys_msg_dist":
             self.history.update_chat_history(f"[color=00ff00]{message}[/color]")
-        else:
+        elif msg_type == "chat_msg_dist":
             self.history.update_chat_history(f"[color=8080ff]{username}[/color] > {message}")
     
     def send_message(self, _):
@@ -159,7 +162,7 @@ class ChatPage(GridLayout):
         if message:
             self.history.update_chat_history(f"{myapp.connect_page.username.text} > {message}")
             #self.history.update_chat_history(f"[color=dd2020]{myapp.connect_page.username.text}[/color] > {message}")
-            socket_client.send(message)
+            socket_client.send_chat_msg(message)
 
         
 
