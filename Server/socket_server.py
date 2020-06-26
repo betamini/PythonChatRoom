@@ -15,6 +15,7 @@ def start_server(ip, port, error_callback, should_run_callable):
 def serve(ip, port, error_callback, should_run_callable):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        socket.setdefaulttimeout(0)
 
         server_socket.bind((ip, port))
         server_socket.listen()
@@ -87,6 +88,7 @@ def serve(ip, port, error_callback, should_run_callable):
 
 def receive_message(client_socket):
     try:
+        #print(f"Recieving message timeout is {client_socket.gettimeout()}")
         raw_data_length = client_socket.recv(DATA_LENGTH_LENGTH)
 
 
@@ -108,7 +110,8 @@ def receive_message(client_socket):
 
         #return {"raw_data_length": raw_data_length, "data": data}
         return data
-    except:
+    except Exception as e:
+        print(f"Exception while reading data: {e}")
         return False
 
 def send(data_string, to_socket, clients):
