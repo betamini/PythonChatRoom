@@ -60,7 +60,7 @@ class ConnectPage(GridLayout):
         info = f"Attempting to connect to {ip}:{port} as {username}"
         myapp.info_page.update_info(info)
         myapp.screen_manager.current = "Info"
-        Clock.schedule_once(self.connect, 0.2)
+        Clock.schedule_once(self.connect, 0.4)
     
     def connect(self, _):
         ip = self.ip.text
