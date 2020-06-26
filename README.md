@@ -31,3 +31,35 @@ pip install D:\Downloads\PyAudio-0.2.11-cp37-cp37m-win_amd64.whl
 ```
 
 ### Kivy
+
+# Tags
+
+## type
+
+### chat_msg_post
+
+From client to server
+
+Tells the server to distribute a message (contents of body) to all other clients (chat_msg_dist)
+
+### chat_msg_dist
+
+From server to client
+
+Distributes chat message (contents of body) to all clients
+
+### sys_msg_dist
+
+From server to client
+
+Distributes system message (contents of body) to all clients
+
+### set_username
+
+sets username to contents of body
+
+## body
+
+## from_user
+
+Specific to chat_msg_dist. Parameter is sett by the server.
