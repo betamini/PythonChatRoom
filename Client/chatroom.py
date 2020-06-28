@@ -7,8 +7,9 @@ from kivy.uix.button import Button
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
-import pyaudio
-import socket_client
+import Client.audiohelper as audiohelper
+import Client.socket_client as socket_client
+import socket_util
 import os
 kivy.require("1.11.1")
 
@@ -44,6 +45,17 @@ class ConnectPage(GridLayout):
         self.join = Button(text="Join", size_hint_y=0.25)
         self.join.bind(on_press=self.joinButton)
         self.add_widget(self.join)
+
+        self.test_audio = Button(text="Test audio", size_hint_y=0.25)
+        self.test_audio.bind(on_press=self.testAudio)
+        self.add_widget(self.test_audio)
+
+    def testAudio(self, instance):
+        a = audiohelper.Audio()
+
+        a.test_audio()
+
+        a.terminate()
     
     def joinButton(self, instance):
         ip = self.ip.text
@@ -52,8 +64,7 @@ class ConnectPage(GridLayout):
 
         print(f"Attempting to connect to {ip}:{port} as {username}")
 
-        #TODO
-        #store in json file format
+        #TODO - store in json file format
         with open("prev_connect.txt", "w", encoding="utf-8") as f:
             f.write(f"{ip},{port},{username}")
 
@@ -123,9 +134,10 @@ class ChatPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.run_state = False
+        self.active_audio_stream = None
 
         self.cols = 1
-        self.rows = 2
+        self.rows = 3
 
         self.history = ScrollableLabel(size_hint_y=9)
         self.add_widget(self.history)
@@ -133,7 +145,7 @@ class ChatPage(GridLayout):
         
         bottom_line = GridLayout(cols=2)
 
-        self.new_message = TextInput(size_hint_x=4, multiline=False)
+        self.new_message = TextInput(size_hint_x=3, multiline=False)
         bottom_line.add_widget(self.new_message)
         
         self.send = Button(text="Send")
@@ -142,19 +154,33 @@ class ChatPage(GridLayout):
 
         self.add_widget(bottom_line)
 
+        self.pushtotalk = Button(text="Push to talk")
+        self.pushtotalk.bind(state=self.push_to_talk)
+        self.add_widget(self.pushtotalk)
+
+    def push_to_talk(self, instance, value):
+        print("my current state is {}".format(value))
+        
+        if value is "down":
+            if self.active_audio_stream is None:
+                self.active_audio_stream = myapp.audio.record_to_callback(lambda d, f, t, s: myapp.audio.simple_stream_wrapper(socket_client.send_audiochunk, d, f, t, s))
+        elif value is "normal":
+            myapp.audio.terminate_stream(self.active_audio_stream)
+            self.active_audio_stream = None
+
     def start_listening(self):
         self.run_state = True
-        socket_client.start_listening(self.incoming_message_callback, myapp.error_handler.show_error, self.should_run_callable)
+
+        self.callback_dict = {}
+        self.callback_dict["sys_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=00ff00]{b_ba.decode('utf-8')}[/color]")
+        self.callback_dict["chat_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=8080ff]{h_obj['from_user']}[/color] > {b_ba.decode('utf-8')}")
+        self.callback_dict["chat_audio_dist"] = lambda h_obj, b_ba:myapp.audio.play_stream.write(b_ba, myapp.audio.CHUNK)
+
+        socket_client.start_listening(self.callback_dict, myapp.error_handler.show_error, self.should_run_callable)
 
     def should_run_callable(self):
         return self.run_state
 
-    def incoming_message_callback(self, username, message, msg_type):
-        if msg_type == "sys_msg_dist":
-            self.history.update_chat_history(f"[color=00ff00]{message}[/color]")
-        elif msg_type == "chat_msg_dist":
-            self.history.update_chat_history(f"[color=8080ff]{username}[/color] > {message}")
-    
     def send_message(self, _):
         message = self.new_message.text
         self.new_message.text = ""
@@ -165,7 +191,6 @@ class ChatPage(GridLayout):
             socket_client.send_chat_msg(message)
 
         
-
 class InfoPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -201,6 +226,7 @@ class MyApp(App):
         screen.add_widget(self.chat_page)
         self.screen_manager.add_widget(screen)
 
+        self.audio = audiohelper.Audio()
 
         return self.screen_manager
 
@@ -222,6 +248,11 @@ class ErrorHandler:
     def show_error_connect_proxy(self, _):
         myapp.screen_manager.current = "Connect"
     
+def run():
+    global myapp
+
+    myapp = MyApp()
+    myapp.run()
 
 if __name__ == "__main__":
     myapp = MyApp()
