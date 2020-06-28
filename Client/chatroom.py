@@ -19,14 +19,15 @@ class ConnectPage(GridLayout):
         self.cols = 1
         self.getinfogrid = GridLayout(cols=2)
 
+        prev_ip = ""
+        prev_port = ""
+        prev_username = "" 
         if os.path.isfile("prev_connect.txt"):
             with open("prev_connect.txt", "r", encoding="utf-8") as f:
                 try:
                     prev_ip, prev_port, prev_username = f.read().split(",")
                 except:
-                    prev_ip = ""
-                    prev_port = ""
-                    prev_username = "" 
+                    pass
 
         self.getinfogrid.add_widget(Label(text="IP:"))
         self.ip = TextInput(multiline=False, text=prev_ip)
@@ -73,17 +74,18 @@ class ConnectPage(GridLayout):
         myapp.screen_manager.current = "Info"
         Clock.schedule_once(self.connect, 0.4)
     
-    def connect(self, _):
+    def connect(self, instance):
         ip = self.ip.text
         port = int(self.port.text)
         username = self.username.text
 
-        if not socket_client.connect(ip, port, username, myapp.error_handler.show_error):
-            return
+        error_trigger_bool, error_str = socket_client.connect(ip, port, username)
 
-        myapp.chat_page.start_listening()
-
-        myapp.screen_manager.current = "Chat"
+        if error_trigger_bool:
+            myapp.error_handler.show_error(error_str)
+        else:
+            myapp.chat_page.start_listening()
+            myapp.screen_manager.current = "Chat"
         
 # This class is an improved version of Label
 # Kivy does not provide scrollable label, so we need to create one
@@ -173,7 +175,7 @@ class ChatPage(GridLayout):
 
         self.callback_dict = {}
         self.callback_dict["sys_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=00ff00]{b_ba.decode('utf-8')}[/color]")
-        self.callback_dict["chat_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=8080ff]{h_obj['from_user']}[/color] > {b_ba.decode('utf-8')}")
+        self.callback_dict["chat_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=8080ff]{h_obj['from_user']}[/color]> {b_ba.decode('utf-8')}")
         self.callback_dict["chat_audio_dist"] = lambda h_obj, b_ba:myapp.audio.play_stream.write(b_ba, myapp.audio.CHUNK)
 
         socket_client.start_listening(self.callback_dict, myapp.error_handler.show_error, self.should_run_callable)
@@ -186,7 +188,7 @@ class ChatPage(GridLayout):
         self.new_message.text = ""
 
         if message:
-            self.history.update_chat_history(f"{myapp.connect_page.username.text} > {message}")
+            self.history.update_chat_history(f"{myapp.connect_page.username.text}> {message}")
             #self.history.update_chat_history(f"[color=dd2020]{myapp.connect_page.username.text}[/color] > {message}")
             socket_client.send_chat_msg(message)
 
