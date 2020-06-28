@@ -3,6 +3,7 @@ import select
 import queue
 import json
 from threading import Thread
+import socket_util
 
 DATA_LENGTH_LENGTH = 2
 index = 0
@@ -13,6 +14,10 @@ def start_server(ip, port, error_callback, should_run_callable):
     Thread(target=serve, args=(ip, port, error_callback, should_run_callable), daemon=True).start()
 
 def serve(ip, port, error_callback, should_run_callable):
+    handle_data_type = {}
+    handle_data_type['chat_msg_post'] = lambda u_str, h_obj, b_ba:handle_chat_msg_post(u_str, h_obj, b_ba, clients, notified_socket)
+    handle_data_type['chat_audio_post'] = lambda u_str, h_obj, b_ba:handle_chat_audio_post(u_str, h_obj, b_ba, clients, notified_socket)
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         socket.setdefaulttimeout(0)
@@ -36,50 +41,45 @@ def serve(ip, port, error_callback, should_run_callable):
                 if notified_socket is server_socket:
                     client_socket, client_address = server_socket.accept()
 
-                    message = receive_message(client_socket)
-                    if message is False:
+                    header_obj, body_ba, error_str = socket_util.receive_message(client_socket)
+                    if header_obj is False:
                         continue
                     sockets_list.append(client_socket)
 
 
-                    if message["type"] == "set_username":
-                        clients[client_socket] = message["body"]
+                    if header_obj["type"] == "set_username":
+                        clients[client_socket] = body_ba.decode("utf-8")
                     else:
+                        handle_data_type[header_obj["type"]](clients[client_socket], header_obj, body_ba)
                         clients[client_socket] = "Dummy/Placeholder"
 
                     #if len(message["data"].decode("utf-8")) > 30:
                     #    user["data"] = message["data"].decode('utf-8')[:30].encode('utf-8')
 
-                    print(f"Accepted new connection from {client_address[0]}:{client_address[1]} with username {message['body']}")
+                    print(f"{client_address[0]}:{client_address[1]} Connection accepted  Username: {body_ba.decode('utf-8')}")
                     for client_socket in clients:
-                        #send_raw(encode("System") + encode(f"{user['data'].decode('utf-8')} joind the chatroom"), client_socket, clients)
-                        #send("System", client_socket, clients)
-                        #send(f"{user['data'].decode('utf-8')} joind the chatroom", client_socket, clients)
-                        body = f"{message['body']} joind the chatroom"
-                        send_json(json.dumps({"type":"sys_msg_dist", "body":body}), client_socket, clients)
+                        rep_body_ba = f"{body_ba.decode('utf-8')} joind the chatroom".encode("utf-8")
+                        send_to(client_socket, {"type":"sys_msg_dist"}, rep_body_ba)
+                        #send_json(json.dumps({"type":"sys_msg_dist", "body":body}), client_socket, clients)
                 else:
-                    message = receive_message(notified_socket)
+                    header_obj, body_ba, error_str = socket_util.receive_message(notified_socket)
 
-                    if message is False:
-                        print(f"Closed connection from {clients[notified_socket]}")
+                    if header_obj is False:
+                        print(error_str)
+                        print(f"Closing connection from {clients[notified_socket]}")
                         close_connection(notified_socket, sockets_list, clients)
                         continue
-                    
-                    user = clients[notified_socket]
-                    print(f"Recieved message from {user}: {message}")
 
-                    for client_socket in clients:
-                        if client_socket != notified_socket:
-                            #send_raw(user['raw_data_length'] + user['data'] + message['raw_data_length'] + message['data'], client_socket, clients)
-                            #send(user['data'], client_socket, clients)
-                            #send(message['raw_data_length'] + message['data'], client_socket, clients)
-                            message["type"] = "chat_msg_dist"
-                            message["from_user"] = user
-                            send_json(json.dumps(message), client_socket, clients)
+                    if "type" in header_obj:
+                        user_str = clients[notified_socket]
 
+                        print(f"{notified_socket.getpeername()[0]}:{notified_socket.getpeername()[1]} Recieved message  Type: {header_obj['type']}")
 
-
-        
+                        if header_obj["type"] in handle_data_type:
+                            handle_data_type[header_obj["type"]](user_str, header_obj, body_ba)
+                        else:
+                            print(f"Unrecougnisable data  Type: {header_obj['type']}")
+                         
         for client_socket in clients:
             close_connection(client_socket, sockets_list, clients)
         
@@ -89,11 +89,11 @@ def serve(ip, port, error_callback, should_run_callable):
 def receive_message(client_socket):
     try:
         #print(f"Recieving message timeout is {client_socket.gettimeout()}")
-        raw_data_length = client_socket.recv(DATA_LENGTH_LENGTH)
+        fixed_length_header_ba = client_socket.recv(DATA_LENGTH_LENGTH)
 
 
-        if not len(raw_data_length):
-            return False
+        if not len(fixed_length_header_ba):
+            return (False, None)
         
         # Minecraft server fun
         # https://wiki.vg/Protocol#Handshaking
@@ -103,42 +103,74 @@ def receive_message(client_socket):
         #    data_length = int.from_bytes(raw_data_length, 'big')
         #    data += client_socket.recv(data_length - (int(raw_data_length[0], base=0) - 1))
         
-        data_length = int.from_bytes(raw_data_length, 'big')
-        data = json.loads(client_socket.recv(data_length))
+        fixed_length_header_int = int.from_bytes(fixed_length_header_ba, 'big')
 
-        print(f"Received data of length {data_length} ({raw_data_length}), Data:{data}")
+        header_obj = json.loads(client_socket.recv(fixed_length_header_int))
 
-        #return {"raw_data_length": raw_data_length, "data": data}
-        return data
+        print(f"\nReceived  Length: {fixed_length_header_int}  Data:{header_obj}")
+        
+        if "Content-Length" in header_obj:
+            if header_obj["Content-Length"] is not 0:
+                body = client_socket.recv(header_obj["Content-Length"])
+                return (header_obj, body)
+
+        return (header_obj, None)
     except Exception as e:
         print(f"Exception while reading data: {e}")
-        return False
+        return (False, None)
 
-def send(data_string, to_socket, clients):
-    data = data_string.encode("utf-8")
-    data_length = len(data).to_bytes(2, 'big')
-    print(f"Sent message to {clients[to_socket]} containing: {data}")
-    #to_socket.send(data['header'] + data['data'])
-    to_socket.send(data_length + data)
+def send_to(to_socket, pyobject, body_bytearray=bytearray()):
+    pyobject["Content-Length"] = len(body_bytearray)
+    header_bytearray = json.dumps(pyobject).encode("utf-8")
+
+    fixed_length_header = len(header_bytearray).to_bytes(2, 'big')
+    to_socket.send(fixed_length_header + header_bytearray + body_bytearray)
+
+    print(f"{to_socket.getpeername()[0]}:{to_socket.getpeername()[1]} Sent message  Data: {header_bytearray}")
+
+#def send(data_string, to_socket, clients):
+#    data = data_string.encode("utf-8")
+#    data_length = len(data).to_bytes(2, 'big')
+#    to_socket.send(data_length + data)
+#    
+#    print(f"Sent message to {clients[to_socket]} Socket: {to_socket} Peername: {to_socket.getpeername()} Sockname: {to_socket.getsockname()}  Data: {data}")
 
 def send_json(json_string, to_socket, clients):
     json_string_length = len(json_string).to_bytes(2, 'big')
-    print(f"Sent message to {clients[to_socket]} containing: {json_string}")
+    #print(f"Sent message to {clients[to_socket]} containing: {json_string}")
+    #print(f"Sent message to {clients[to_socket]} Socket: {to_socket} Peername: {to_socket.getpeername()} Sockname: {to_socket.getsockname()}  Data: {json_string}")
+    print(f"{to_socket.getpeername()[0]}:{to_socket.getpeername()[1]} Sent message  Data: {json_string}")
     to_socket.send(json_string_length + json_string.encode("utf-8"))
 
-def send_raw(raw, to_socket, clients):
-    print(f"Sent message to {clients[to_socket]} containing: {raw}")
-    to_socket.send(raw)
+#def send_raw(raw, to_socket, clients):
+#    print(f"Sent message to {clients[to_socket]} containing: {raw}")
+#    to_socket.send(raw)
 
-def encode(raw_data):
-    data = str(raw_data).encode("utf-8")
+#def encode(raw_data):
+#    data = str(raw_data).encode("utf-8")
     #try:
-    data_length = len(data).to_bytes(2, 'big')
+#    data_length = len(data).to_bytes(2, 'big')
     #except OverflowError as e:
     #    print("data is too long, triggeres overflow error")
     #    return False
-    return data_length + data
+#    return data_length + data
     #return {"raw_data_length": data_length, "data": data}
+
+def handle_chat_msg_post(user, header_obj, body_bytearray, clients, notified_socket):
+    for client_socket in clients:
+        if client_socket != notified_socket:
+            header_obj["type"] = "chat_msg_dist"
+            header_obj["from_user"] = user
+            send_to(client_socket, header_obj, body_bytearray)
+            #send_json(json.dumps(header), client_socket, clients)
+
+def handle_chat_audio_post(user, header, body_bytearray, clients, notified_socket):
+    for client_socket in clients:
+        if client_socket != notified_socket:
+            header["type"] = "chat_audio_dist"
+            header["from_user"] = user
+            send_to(client_socket, header, body_bytearray)
+            #send_json(json.dumps(header), client_socket, clients)
 
 def close_connection(socket_to_close, sockets_list, clients):
     socket_to_close.close()
@@ -146,9 +178,7 @@ def close_connection(socket_to_close, sockets_list, clients):
     user = clients[socket_to_close]
     del clients[socket_to_close]
 
-    #name = encode("System")
     for client_socket in clients:
-        #send("System", client_socket, clients)
-        #send(f"{user['data'].decode('utf-8')} exited the chatroom", client_socket, clients)
-        body = f"{user} exited the chatroom"
-        send_json(json.dumps({"type":"sys_msg_dist", "body":body}), client_socket, clients)
+        body_bytearray = f"{user} exited the chatroom".encode("utf-8")
+        send_to(client_socket, {"type":"sys_msg_dist"}, body_bytearray)
+        #send_json(json.dumps({"type":"sys_msg_dist", "body":body}), client_socket, clients)
