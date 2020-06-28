@@ -7,18 +7,21 @@ FIXED_LENGTH_HEADER_LENGTH = 2
 # header_obj == false -> error
 def receive_message(sock):
     try:
+        print(f"\n{sock.getpeername()[0]}:{sock.getpeername()[1]}: Trying to receive message")
+
         fixed_length_header_ba = sock.recv(FIXED_LENGTH_HEADER_LENGTH)
 
         # If we received no data, client gracefully closed a connection, for example using socket.close() or socket.shutdown(socket.SHUT_RDWR)
         if not len(fixed_length_header_ba):
-            return (False, None, "Connection closed by opposit side")
+            print("Recieved empty message")
+            return (False, None, "Recieved empty message. Connection closed by opposit side")
         
         # Convert header to int value
         fixed_length_header_int = int.from_bytes(fixed_length_header_ba, 'big')
+        print(f"Received fixed length header: {fixed_length_header_int}")
         
         header_obj = json.loads(sock.recv(fixed_length_header_int))
-
-        print(f"\nReceived  Length: {fixed_length_header_int}  Data:{header_obj}")
+        print(f"Received header object: {header_obj}")
 
         if "Content-Length" in header_obj:
             if header_obj["Content-Length"] is not 0:
