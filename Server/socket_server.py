@@ -15,8 +15,9 @@ def start_server(ip, port, error_callback, should_run_callable):
 
 def serve(ip, port, error_callback, should_run_callable):
     handle_data_type = {}
-    handle_data_type['chat_msg_post'] = lambda u_str, h_obj, b_ba:handle_chat_msg_post(u_str, h_obj, b_ba, clients, notified_socket)
-    handle_data_type['chat_audio_post'] = lambda u_str, h_obj, b_ba:handle_chat_audio_post(u_str, h_obj, b_ba, clients, notified_socket)
+    handle_data_type['chat_msg_post'] = lambda u_str, h_obj, b_ba, from_socket:handle_chat_msg_post(u_str, h_obj, b_ba, from_socket, clients)
+    handle_data_type['chat_audio_post'] = lambda u_str, h_obj, b_ba, from_socket:handle_chat_audio_post(u_str, h_obj, b_ba, from_socket, clients)
+    handle_data_type['set_username'] = lambda u_str, h_obj, b_ba, from_socket:handle_set_username_post(u_str, h_obj, b_ba, from_socket, clients)
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -40,34 +41,34 @@ def serve(ip, port, error_callback, should_run_callable):
             for notified_socket in read_sockets:
                 if notified_socket is server_socket:
                     client_socket, client_address = server_socket.accept()
+                    print(f"{client_address[0]}:{client_address[1]} Connection accepted")
 
-                    header_obj, body_ba, error_str = socket_util.receive_message(client_socket)
-                    if header_obj is False:
-                        continue
+                    #header_obj, body_ba, error_str = socket_util.receive_message(client_socket)
+                    #if error_str is not None:
+                    #    continue
                     sockets_list.append(client_socket)
+                    clients[client_socket] = ""
 
 
-                    if header_obj["type"] == "set_username":
-                        clients[client_socket] = body_ba.decode("utf-8")
-                    else:
-                        handle_data_type[header_obj["type"]](clients[client_socket], header_obj, body_ba)
-                        clients[client_socket] = "Dummy/Placeholder"
+                    #if header_obj["type"] == "set_username":
+                    #    clients[client_socket] = body_ba.decode("utf-8")
+                    #else:
 
                     #if len(message["data"].decode("utf-8")) > 30:
                     #    user["data"] = message["data"].decode('utf-8')[:30].encode('utf-8')
 
-                    print(f"{client_address[0]}:{client_address[1]} Connection accepted  Username: {body_ba.decode('utf-8')}")
-                    for client_socket in clients:
-                        rep_body_ba = f"{body_ba.decode('utf-8')} joind the chatroom".encode("utf-8")
-                        send_to(client_socket, {"type":"sys_msg_dist"}, rep_body_ba)
+                    #for client_socket in clients:
+                    #    rep_body_ba = f"{body_ba.decode('utf-8')} joind the chatroom".encode("utf-8")
+                    #    send_to(client_socket, {"type":"sys_msg_dist"}, rep_body_ba)
                         #send_json(json.dumps({"type":"sys_msg_dist", "body":body}), client_socket, clients)
                 else:
                     header_obj, body_ba, error_str = socket_util.receive_message(notified_socket)
 
-                    if header_obj is False:
+                    if error_str is not None:
                         print(error_str)
                         print(f"Closing connection from {clients[notified_socket]}")
                         close_connection(notified_socket, sockets_list, clients)
+                        print("Connection closed")
                         continue
 
                     if "type" in header_obj:
@@ -76,7 +77,7 @@ def serve(ip, port, error_callback, should_run_callable):
                         print(f"{notified_socket.getpeername()[0]}:{notified_socket.getpeername()[1]} Recieved message  Type: {header_obj['type']}")
 
                         if header_obj["type"] in handle_data_type:
-                            handle_data_type[header_obj["type"]](user_str, header_obj, body_ba)
+                            handle_data_type[header_obj["type"]](user_str, header_obj, body_ba, notified_socket)
                         else:
                             print(f"Unrecougnisable data  Type: {header_obj['type']}")
                          
@@ -156,21 +157,44 @@ def send_json(json_string, to_socket, clients):
 #    return data_length + data
     #return {"raw_data_length": data_length, "data": data}
 
-def handle_chat_msg_post(user, header_obj, body_bytearray, clients, notified_socket):
+def handle_chat_msg_post(user_str, header_obj, body_bytearray, from_socket, clients):
     for client_socket in clients:
-        if client_socket != notified_socket:
+        if client_socket != from_socket:
             header_obj["type"] = "chat_msg_dist"
-            header_obj["from_user"] = user
+            header_obj["from_user"] = user_str
             send_to(client_socket, header_obj, body_bytearray)
-            #send_json(json.dumps(header), client_socket, clients)
+            #send_json(json.dumps(header_obj), client_socket, clients)
 
-def handle_chat_audio_post(user, header, body_bytearray, clients, notified_socket):
+def handle_chat_audio_post(user_str, header_obj, body_bytearray, from_socket, clients):
     for client_socket in clients:
-        if client_socket != notified_socket:
-            header["type"] = "chat_audio_dist"
-            header["from_user"] = user
-            send_to(client_socket, header, body_bytearray)
-            #send_json(json.dumps(header), client_socket, clients)
+        if client_socket != from_socket:
+            header_obj["type"] = "chat_audio_dist"
+            header_obj["from_user"] = user_str
+            send_to(client_socket, header_obj, body_bytearray)
+            #send_json(json.dumps(header_obj), client_socket, clients)
+
+def handle_set_username_post(user_str, header_obj, body_bytearray, from_socket, clients):
+    desiered_name_str = body_bytearray.decode("utf-8")
+    if desiered_name_str is not "":
+        availible = True
+
+        for client_socket in clients:
+            if clients[client_socket] is desiered_name_str:
+                if client_socket is not from_socket:
+                    availible = False
+
+        if availible:
+            clients[client_socket] = desiered_name_str
+
+            if user_str is "":
+                rep_body_ba = f"{body_bytearray.decode('utf-8')} joind the chatroom".encode("utf-8")
+            else:
+                rep_body_ba = f"{user_str} was renamed to {clients[client_socket]}".encode("utf-8")
+
+            for client_socket in clients:
+                send_to(client_socket, {"type":"sys_msg_dist"}, rep_body_ba)
+    else:
+        send_to(from_socket, {"type":"sys_msg_dist"}, "Username can't be set to empty".encode("utf-8"))
 
 def close_connection(socket_to_close, sockets_list, clients):
     socket_to_close.close()
