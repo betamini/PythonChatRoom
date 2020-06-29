@@ -8,7 +8,7 @@
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 & d:/Koding/Prototyping/PythonChatRoom/PythonChatRoom/kivy_venv/Scripts/Activate.ps1
 cd D:/Koding/Prototyping/PythonChatRoom/PythonChatRoom/Releases/Server
-python -m PyInstaller --name ServerV0.3 --onefile --clean D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom\init_server.py --hidden-import=pkg_resources.py2_warn --add-binary='D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom\kivy_venv\share\sdl2\bin\libpng16-16.dll;.'
+python -m PyInstaller --name ServerV0.3 --onefile --clean D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom\init_server.py --hidden-import=pkg_resources.py2_warn --add-binary='D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom\kivy_venv\share\sdl2\bin\libpng16-16.dll;.' --distpath=path-'D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom'
 ```
 
 ### Client
@@ -17,7 +17,7 @@ python -m PyInstaller --name ServerV0.3 --onefile --clean D:\Koding\Prototyping\
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 & d:/Koding/Prototyping/PythonChatRoom/PythonChatRoom/kivy_venv/Scripts/Activate.ps1
 cd D:/Koding/Prototyping/PythonChatRoom/PythonChatRoom/Releases/Client
-python -m PyInstaller --name ChatRoomV0.3.1 --onefile --clean D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom\init_client.py --hidden-import=pkg_resources.py2_warn --add-binary='D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom\kivy_venv\share\sdl2\bin\libpng16-16.dll;.'
+python -m PyInstaller --name ChatRoomV0.3.1 --onefile --clean D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom\init_client.py --hidden-import=pkg_resources.py2_warn --add-binary='D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom\kivy_venv\share\sdl2\bin\libpng16-16.dll;.' --distpath='D:\Koding\Prototyping\PythonChatRoom\PythonChatRoom'
 ```
 
 ## Modules
