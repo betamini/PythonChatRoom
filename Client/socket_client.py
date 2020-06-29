@@ -30,8 +30,8 @@ def connect(ip, port, raw_username):
 def send_chat_msg(message):
     send({"type":"chat_msg_post"}, message.encode("utf-8"))
 
-def send_audiochunk(audiobytes):
-    send({"type":"chat_audio_post"}, audiobytes)
+def send_audiochunk(audiobytes, frame_count, time_info, status, chunk, width, channels, rate):
+    send({"type":"chat_audio_post", "frame_count":frame_count, "time_info":time_info, "status":status, "chunk": chunk, "width": width, "channels":channels, "rate":rate}, audiobytes)
 
 def set_username(username):
     send({"type":"set_username"}, username.encode("utf-8"))
