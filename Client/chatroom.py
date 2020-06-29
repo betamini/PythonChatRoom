@@ -165,10 +165,16 @@ class ChatPage(GridLayout):
         
         if value is "down":
             if self.active_audio_stream is None:
-                self.active_audio_stream = myapp.audio.record_to_callback(lambda d, f, t, s: myapp.audio.simple_stream_wrapper(socket_client.send_audiochunk, d, f, t, s))
+                self.active_audio_stream = myapp.audio.record_to_callback(self.record_callback)
         elif value is "normal":
             myapp.audio.terminate_stream(self.active_audio_stream)
             self.active_audio_stream = None
+
+    def record_callback(self, d, f, t, s):
+        socket_client.send_audiochunk(d, f, t, s, myapp.audio.CHUNK, myapp.audio.WIDTH, myapp.audio.CHANNELS, myapp.audio.RATE)
+
+        return (None, 0)
+        #return (None, pyaudio.paContinue)
 
     def start_listening(self):
         self.run_state = True
@@ -176,7 +182,7 @@ class ChatPage(GridLayout):
         self.callback_dict = {}
         self.callback_dict["sys_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=00ff00]{b_ba.decode('utf-8')}[/color]")
         self.callback_dict["chat_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=8080ff]{h_obj['from_user']}[/color]> {b_ba.decode('utf-8')}")
-        self.callback_dict["chat_audio_dist"] = lambda h_obj, b_ba:myapp.audio.play_stream.write(b_ba, myapp.audio.CHUNK)
+        self.callback_dict["chat_audio_dist"] = lambda h_obj, b_ba:myapp.audio.play_stream.write(b_ba, h_obj["frame_count"])
 
         socket_client.start_listening(self.callback_dict, myapp.error_handler.show_error, self.should_run_callable)
 
