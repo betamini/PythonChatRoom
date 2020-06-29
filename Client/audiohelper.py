@@ -3,7 +3,7 @@ import time
 import threading
 
 class Audio(pyaudio.PyAudio):
-    def __init__(self, CHUNK=1024, WIDTH=2, CHANNELS=1, RATE=4000, TEST_RECORD_SECONDS = 6):
+    def __init__(self, CHUNK=512, WIDTH=2, CHANNELS=1, RATE=8000, TEST_RECORD_SECONDS = 6):
         super().__init__()
         self.RATE = RATE
         self.CHUNK = CHUNK
@@ -64,6 +64,6 @@ class Audio(pyaudio.PyAudio):
         stream.stop_stream()
         stream.close()
 
-    def simple_stream_wrapper(self, f, in_data, frame_count, time_info, status):
-        f(in_data)
+    def simple_stream_wrapper(self, func, in_data, frame_count, time_info, status):
+        func(in_data)
         return (None, pyaudio.paContinue)
