@@ -8,7 +8,6 @@ from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
 import Server.socket_server as socket_server
-import socket_util
 import os
 kivy.require("1.11.1")
 
