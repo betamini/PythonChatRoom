@@ -3,7 +3,7 @@ import time
 import threading
 
 class Audio(pyaudio.PyAudio):
-    def __init__(self, CHUNK=512, WIDTH=2, CHANNELS=1, RATE=8000, TEST_RECORD_SECONDS = 6):
+    def __init__(self, CHUNK=2048, WIDTH=2, CHANNELS=1, RATE=48000, TEST_RECORD_SECONDS = 6):
         super().__init__()
         self.RATE = RATE
         self.CHUNK = CHUNK
