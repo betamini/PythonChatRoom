@@ -9,6 +9,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
 import Client.audiohelper as audiohelper
 import Client.socket_client as socket_client
+from Client.socket_client import CallCodes
 import socket_util
 import os
 kivy.require("1.11.1")
@@ -74,19 +75,17 @@ class ConnectPage(GridLayout):
         myapp.screen_manager.current = "Info"
         Clock.schedule_once(self.connect, 0.4)
     
-    def connect(self, instance):
+    def connect(self, _):
         ip = self.ip.text
         port = int(self.port.text)
         username = self.username.text
 
-        error_trigger_bool, error_str = socket_client.connect(ip, port, username)
-
-        if error_trigger_bool:
-            myapp.error_handler.show_error(error_str)
-        else:
-            myapp.chat_page.start_listening()
+        if socket_client.start(ip, port):
             myapp.screen_manager.current = "Chat"
-        
+            socket_client.set_username(username)
+        else:
+            myapp.error_handler.show_error("Unable to connect with server")
+
 # This class is an improved version of Label
 # Kivy does not provide scrollable label, so we need to create one
 class ScrollableLabel(ScrollView):
@@ -135,15 +134,13 @@ class ScrollableLabel(ScrollView):
 class ChatPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.run_state = False
         self.active_audio_stream = None
 
         self.cols = 1
-        self.rows = 3
+        self.rows = 4
 
         self.history = ScrollableLabel(size_hint_y=9)
         self.add_widget(self.history)
-
         
         bottom_line = GridLayout(cols=2)
 
@@ -160,6 +157,21 @@ class ChatPage(GridLayout):
         self.pushtotalk.bind(state=self.push_to_talk)
         self.add_widget(self.pushtotalk)
 
+        self.exit_button = Button(text="Exit")
+        self.exit_button.bind(on_press=lambda _:socket_client.stop())
+        self.add_widget(self.exit_button)
+
+        socket_client.callback_handler.register(CallCodes.LOG_DEBUG, lambda msg_str:print(f"DEBUG: {msg_str}"))
+        socket_client.callback_handler.register(CallCodes.LOG_INFO, lambda msg_str:print(f"INFO: {msg_str}"))
+        socket_client.callback_handler.register(CallCodes.LOG_WARNING, lambda msg_str:print(f"WARN: {msg_str}"))
+        socket_client.callback_handler.register(CallCodes.LOG_ERROR, lambda msg_str:print(f"ERROR: {msg_str}"))
+        
+        socket_client.callback_handler.register(CallCodes.NEW_SYS_MSG, lambda data:self.history.update_chat_history(f"[color=00ff00]{data[1].decode('utf-8')}[/color]"))
+        #socket_client.callback_handler.register(CallCodes.NEW_SYS_MSG, lambda data:self.history.update_chat_history(f"[color=00ff00]{data}[/color]"))
+        socket_client.callback_handler.register(CallCodes.NEW_CHAT_MSG, lambda data:self.history.update_chat_history(f"[color=8080ff]{data[0]['from_user']}[/color]> {data[1].decode('utf-8')}"))
+        socket_client.callback_handler.register(CallCodes.NEW_CHAT_AUDIO, lambda data:myapp.audio.play_stream.write(bytes(data[1]) )) #, data[0]["frame_count"]))
+        socket_client.callback_handler.register(CallCodes.CONNECTION_CLOSED, lambda _:myapp.error_handler.show_error("Connection with server closed"))
+
     def push_to_talk(self, instance, value):
         print("my current state is {}".format(value))
         
@@ -175,19 +187,6 @@ class ChatPage(GridLayout):
 
         return (None, 0)
         #return (None, pyaudio.paContinue)
-
-    def start_listening(self):
-        self.run_state = True
-
-        self.callback_dict = {}
-        self.callback_dict["sys_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=00ff00]{b_ba.decode('utf-8')}[/color]")
-        self.callback_dict["chat_msg_dist"] = lambda h_obj, b_ba:self.history.update_chat_history(f"[color=8080ff]{h_obj['from_user']}[/color]> {b_ba.decode('utf-8')}")
-        self.callback_dict["chat_audio_dist"] = lambda h_obj, b_ba:myapp.audio.play_stream.write(b_ba, h_obj["frame_count"])
-
-        socket_client.start_listening(self.callback_dict, myapp.error_handler.show_error, self.should_run_callable)
-
-    def should_run_callable(self):
-        return self.run_state
 
     def send_message(self, _):
         message = self.new_message.text
@@ -240,7 +239,6 @@ class MyApp(App):
 
 class ErrorHandler:  
     def show_error(self, error_msg):
-        myapp.chat_page.run_state = False
         self.countdown = 5
         self.error_msg = error_msg
         self.updateclockthing = Clock.schedule_interval(self.show_error_update_text, 1)
@@ -255,13 +253,14 @@ class ErrorHandler:
     
     def show_error_connect_proxy(self, _):
         myapp.screen_manager.current = "Connect"
-    
-def run():
+
+myapp = None
+
+def main():
     global myapp
 
     myapp = MyApp()
     myapp.run()
 
 if __name__ == "__main__":
-    myapp = MyApp()
-    myapp.run()
+    main()
