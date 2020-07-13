@@ -7,10 +7,11 @@ from kivy.uix.button import Button
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
-import Client.audiohelper as audiohelper
-import Client.socket_client as socket_client
-from Client.socket_client import CallCodes
+from kivy.utils import escape_markup
+from callback_handler import BasicCallCodes
+from Client.client_controller_util import ViewCallCodes, UserActionCodes
 import socket_util
+import functools
 import os
 kivy.require("1.11.1")
 
@@ -31,60 +32,76 @@ class ConnectPage(GridLayout):
                     pass
 
         self.getinfogrid.add_widget(Label(text="IP:"))
-        self.ip = TextInput(multiline=False, text=prev_ip)
+        self.ip = MyTextInput(multiline=False, text=prev_ip)
         self.getinfogrid.add_widget(self.ip)
+        self.ip.enter_function = lambda *args: callback_handler.run(UserActionCodes.JOIN, self.ip.text, int(self.port.text))
 
         self.getinfogrid.add_widget(Label(text="Port:"))
-        self.port = TextInput(multiline=False, text=prev_port)
+        self.port = MyTextInput(multiline=False, text=prev_port)
         self.getinfogrid.add_widget(self.port)
+        self.port.enter_function = lambda *args: callback_handler.run(UserActionCodes.JOIN, self.ip.text, int(self.port.text))
 
         self.getinfogrid.add_widget(Label(text="Username:"))
-        self.username = TextInput(multiline=False, text=prev_username)
+        #self.username = TextInput(multiline=False, text=prev_username)
+        self.username = MyTextInput(multiline=False, text=prev_username)
+        self.username.enter_function = lambda *args: callback_handler.run(UserActionCodes.JOIN, self.ip.text, int(self.port.text))
+        #temp = self.username.keyboard_on_key_down
+        #self.username.keyboard_on_key_down = lambda window, keycode, text, modifiers: print(f"Window: {window}  Keycode: {keycode}  Text: {text}  Modifiers: {modifiers}  Ingnore this: {temp(window, keycode, text, modifiers)}")
         self.getinfogrid.add_widget(self.username)
 
         self.add_widget(self.getinfogrid)
 
         self.join = Button(text="Join", size_hint_y=0.25)
-        self.join.bind(on_press=self.joinButton)
+        self.join.bind(on_press= lambda _: callback_handler.run(UserActionCodes.JOIN, self.ip.text, int(self.port.text))) #myapp.connect_page.ip.text
         self.add_widget(self.join)
 
         self.test_audio = Button(text="Test audio", size_hint_y=0.25)
-        self.test_audio.bind(on_press=self.testAudio)
+        self.test_audio.bind(on_press= lambda _: callback_handler.run(UserActionCodes.TEST_AUDIO, 4))
         self.add_widget(self.test_audio)
-
-    def testAudio(self, instance):
-        a = audiohelper.Audio()
-
-        a.test_audio()
-
-        a.terminate()
     
-    def joinButton(self, instance):
-        ip = self.ip.text
-        port = self.port.text
-        username = self.username.text
-
-        print(f"Attempting to connect to {ip}:{port} as {username}")
-
+    def save_ip_port_and_name(self, ip, port):
         #TODO - store in json file format
         with open("prev_connect.txt", "w", encoding="utf-8") as f:
-            f.write(f"{ip},{port},{username}")
+            f.write(f"{ip},{port},{myapp.connect_page.username.text}")
 
-        info = f"Attempting to connect to {ip}:{port} as {username}"
-        myapp.info_page.update_info(info)
-        myapp.screen_manager.current = "Info"
-        Clock.schedule_once(self.connect, 0.4)
+    #def joinButton(self, instance):
+    #    ip = self.ip.text
+    #    port = self.port.text
+    #    username = self.username.text
+    #    print(f"Attempting to connect to {ip}:{port} as {username}")
+
+
+    #    info = f"Attempting to connect to {ip}:{port} as {username}"
+    #    myapp.info_page.update_info(info)
+    #    myapp.screen_manager.current = "Info"
+    #    Clock.schedule_once(self.connect, 0.4)
     
-    def connect(self, _):
-        ip = self.ip.text
-        port = int(self.port.text)
-        username = self.username.text
+    #def connect(self, _):
+    #    ip = self.ip.text
+    #    port = int(self.port.text)
+    #    username = self.username.text
 
-        if socket_client.start(ip, port):
-            myapp.screen_manager.current = "Chat"
-            socket_client.set_username(username)
+    #    if callback_handler.run(UserActionCodes.JOIN, (ip, port)):
+    #        myapp.screen_manager.current = "Chat"
+    #        callback_handler.run(UserActionCodes.SET_USERNAME, username)
+    #    else:
+    #        myapp.error_handler.show_error("Unable to connect with server")
+
+class MyTextInput(TextInput):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.enter_function = None
+
+    def keyboard_on_key_down(self, window, keycode, text, modifiers):
+        print(f"Window: {window}  Keycode: {keycode}  Text: {text}  Modifiers: {modifiers}")
+        if keycode[1] == "backspace" and "ctrl" in modifiers:
+            last_space = self.text.rfind(" ", 0, self.cursor_index()) + 1
+            new_str = self.text[:last_space].strip() + self.text[self.cursor_index():]
+            self.text = new_str.strip()
+        if keycode[1] == "enter" and self.enter_function != None:
+            self.enter_function(modifiers)
         else:
-            myapp.error_handler.show_error("Unable to connect with server")
+            super().keyboard_on_key_down(window, keycode, text, modifiers)
 
 # This class is an improved version of Label
 # Kivy does not provide scrollable label, so we need to create one
@@ -92,7 +109,6 @@ class ScrollableLabel(ScrollView):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
         # ScrollView does not allow us to add more than one widget, so we need to trick it
         # by creating a layout and placing two widgets inside it
         # Layout is going to have one collumn and and size_hint_y set to None,
@@ -103,26 +119,49 @@ class ScrollableLabel(ScrollView):
         # Now we need two wodgets - Label for chat history and 'artificial' widget below
         # so we can scroll to it every new message and keep new messages visible
         # We want to enable markup, so we can set colors for example
-        self.chat_history = Label(size_hint_y=None, markup=True)
+        #self.content = Label(size_hint_y=None, markup=True, font_context="./Client", font_name="unifont-13.0.03")
+        self.content = Label(size_hint_y=None, markup=True)
         self.scroll_to_point = Label()
 
         # We add them to our layout
-        self.layout.add_widget(self.chat_history)
+        self.layout.add_widget(self.content)
         self.layout.add_widget(self.scroll_to_point)
 
     # Methos called externally to add new message to the chat history
-    def update_chat_history(self, message):
+    def add_text_row(self, message, trusted_string=False):
 
         # First add new line and message itself
-        self.chat_history.text += '\n' + message
+        if not trusted_string:
+            message = escape_markup(message)
+        self.content.text += '\n' + message
 
         # Set layout height to whatever height of chat history text is + 15 pixels
         # (adds a bit of space at teh bottom)
         # Set chat history label to whatever height of chat history text is
         # Set width of chat history text to 98 of the label width (adds small margins)
-        self.layout.height = self.chat_history.texture_size[1] + 15
-        self.chat_history.height = self.chat_history.texture_size[1]
-        self.chat_history.text_size = (self.chat_history.width * 0.98, None)
+        self.layout.height = self.content.texture_size[1] + 15
+        self.content.height = self.content.texture_size[1]
+        self.content.text_size = (self.content.width * 0.98, None)
+
+        # As we are updating above, text height, so also label and layout height are going to be bigger
+        # than the area we have for this widget. ScrollView is going to add a scroll, but won't
+        # scroll to the botton, nor there is a method that can do that.
+        # That's why we want additional, empty wodget below whole text - just to be able to scroll to it,
+        # so scroll to the bottom of the layout
+        self.scroll_to(self.scroll_to_point)
+    
+    def clear_content(self):
+
+        # First add new line and message itself
+        self.content.text = ""
+
+        # Set layout height to whatever height of chat history text is + 15 pixels
+        # (adds a bit of space at teh bottom)
+        # Set chat history label to whatever height of chat history text is
+        # Set width of chat history text to 98 of the label width (adds small margins)
+        self.layout.height = self.content.texture_size[1] + 15
+        self.content.height = self.content.texture_size[1]
+        self.content.text_size = (self.content.width * 0.98, None)
 
         # As we are updating above, text height, so also label and layout height are going to be bigger
         # than the area we have for this widget. ScrollView is going to add a scroll, but won't
@@ -135,21 +174,34 @@ class ChatPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.active_audio_stream = None
+        self.users = set()
+        self.can_listen = set()
+        self.can_speak = set()
+        self.structure = list()
 
         self.cols = 1
         self.rows = 4
 
-        self.history = ScrollableLabel(size_hint_y=9)
-        self.add_widget(self.history)
+        self.topgrid = GridLayout(cols=2, rows=1, size_hint_y=9)
+        self.history = ScrollableLabel()
+        self.users_list = ScrollableLabel()
+        self.topgrid.add_widget(self.history)
+        self.topgrid.add_widget(self.users_list)
+        self.add_widget(self.topgrid)
         
-        bottom_line = GridLayout(cols=2)
+        bottom_line = GridLayout(cols=3)
 
-        self.new_message = TextInput(size_hint_x=3, multiline=False)
+        self.new_message = MyTextInput(size_hint_x=3, multiline=False)
         bottom_line.add_widget(self.new_message)
+        self.new_message.enter_function = lambda *args: self.on_text_input_enter(*args)
         
         self.send = Button(text="Send")
-        self.send.bind(on_press=self.send_message)
+        self.send.bind(on_press=lambda *args: self.send_message(self.get_str_from_input_field()))
         bottom_line.add_widget(self.send)
+
+        self.set_username_button = Button(text="Set name")
+        self.set_username_button.bind(on_press=self.set_username_trigger)
+        bottom_line.add_widget(self.set_username_button)
 
         self.add_widget(bottom_line)
 
@@ -158,46 +210,127 @@ class ChatPage(GridLayout):
         self.add_widget(self.pushtotalk)
 
         self.exit_button = Button(text="Exit")
-        self.exit_button.bind(on_press=lambda _:socket_client.stop())
+        self.exit_button.bind(on_press=lambda _:callback_handler.run(UserActionCodes.EXIT_SERVER))
         self.add_widget(self.exit_button)
 
-        socket_client.callback_handler.register(CallCodes.LOG_DEBUG, lambda msg_str:print(f"DEBUG: {msg_str}"))
-        socket_client.callback_handler.register(CallCodes.LOG_INFO, lambda msg_str:print(f"INFO: {msg_str}"))
-        socket_client.callback_handler.register(CallCodes.LOG_WARNING, lambda msg_str:print(f"WARN: {msg_str}"))
-        socket_client.callback_handler.register(CallCodes.LOG_ERROR, lambda msg_str:print(f"ERROR: {msg_str}"))
-        
-        socket_client.callback_handler.register(CallCodes.NEW_SYS_MSG, lambda data:self.history.update_chat_history(f"[color=00ff00]{data[1].decode('utf-8')}[/color]"))
-        #socket_client.callback_handler.register(CallCodes.NEW_SYS_MSG, lambda data:self.history.update_chat_history(f"[color=00ff00]{data}[/color]"))
-        socket_client.callback_handler.register(CallCodes.NEW_CHAT_MSG, lambda data:self.history.update_chat_history(f"[color=8080ff]{data[0]['from_user']}[/color]> {data[1].decode('utf-8')}"))
-        socket_client.callback_handler.register(CallCodes.NEW_CHAT_AUDIO, lambda data:myapp.audio.play_stream.write(bytes(data[1]) )) #, data[0]["frame_count"]))
-        socket_client.callback_handler.register(CallCodes.CONNECTION_CLOSED, lambda _:myapp.error_handler.show_error("Connection with server closed"))
+    def on_text_input_enter(self, modifiers):
+        done_something = False
+        input_field_str = self.get_str_from_input_field()
+        if "ctrl" in modifiers:
+            done_something = True
+            self.send_talk_request(input_field_str)
+        if "alt" in modifiers:
+            done_something = True
+            self.send_exit_room()
+        if "shift" in modifiers:
+            done_something = True
+            self.set_username(input_field_str)
+
+        if not done_something:
+            self.send_message(input_field_str)
+
+    def get_str_from_input_field(self):
+        string = self.new_message.text
+        self.new_message.text = ""
+
+        return string
 
     def push_to_talk(self, instance, value):
         print("my current state is {}".format(value))
         
         if value is "down":
-            if self.active_audio_stream is None:
-                self.active_audio_stream = myapp.audio.record_to_callback(self.record_callback)
+            #if self.active_audio_stream is None:
+            callback_handler.run(UserActionCodes.START_AUDIO)
         elif value is "normal":
-            myapp.audio.terminate_stream(self.active_audio_stream)
-            self.active_audio_stream = None
+            callback_handler.run(UserActionCodes.STOP_AUDIO)
+    
+    def set_username_trigger(self, _):
+        self.set_username(self.get_str_from_input_field())
 
-    def record_callback(self, d, f, t, s):
-        socket_client.send_audiochunk(d, f, t, s, myapp.audio.CHUNK, myapp.audio.WIDTH, myapp.audio.CHANNELS, myapp.audio.RATE)
+    def set_username(self, name_str):
+        if isinstance(name_str, str):
+            if name_str != "":
+                myapp.connect_page.username.text = name_str
+                callback_handler.run(UserActionCodes.SET_USERNAME, name_str)
+    
+    def send_message(self, message_str):
+        if message_str:
+            self.history.add_text_row(f"{escape_markup(myapp.connect_page.username.text)}> {escape_markup(message_str)}", True)
+            #self.history.add_text_row(f"[color=dd2020]{myapp.connect_page.username.text}[/color] > {message}")
+            callback_handler.run(UserActionCodes.SEND_MSG, message_str)
+    
+    def new_chat_msg(self, user_str, message_str):
+        self.history.add_text_row(f"{self.format_name(user_str)}> {escape_markup(message_str)}", True)
+    
+    def format_name(self, user_str):
+        can_interact_color = "00cc00" # They are in the same room as you
+        #you_can_only_hear_color = "2e382e" # They are over you in levels
+        you_can_only_speak_to_color = "ff6600" # They are under you in levels
+        no_interaction_color = "00ffcc" # They are outide your scope
+        symbol = ""
+        #8080ff
+        if user_str in self.can_listen:
+            if user_str in self.can_speak:
+                color = can_interact_color
+                #symbol = symbol + "👂🗣"
+            else:
+                color = you_can_only_speak_to_color
+                #symbol = symbol + "👂🤐"
+        #elif user_str in self.can_speak:
+            #return f"[color={you_can_only_hear_color}]{user_str}[/color]"
+        else:
+            color = no_interaction_color
+            #symbol = symbol + "❔🗣"
+        return f"[color={color}]" + escape_markup(user_str) + f"{symbol}[/color]"
 
-        return (None, 0)
-        #return (None, pyaudio.paContinue)
+    def send_talk_request(self, person_str):
+        callback_handler.run(UserActionCodes.SEND_TALK_REQUEST, person_str)
+    
+    def send_exit_room(self):
+        callback_handler.run(UserActionCodes.EXIT_ROOM)
 
-    def send_message(self, _):
-        message = self.new_message.text
-        self.new_message.text = ""
+    def update_users_all(self, users_list, can_listen, can_speak, structure):
+        self.users_list.clear_content()
+        if can_speak != None:
+            self.can_speak = set(can_speak)
+        if can_listen != None:
+            self.can_listen = list(can_listen)
+        if users_list != None:
+            self.users = set(users_list)
+        if structure != None:
+            self.structure = structure
 
-        if message:
-            self.history.update_chat_history(f"{myapp.connect_page.username.text}> {message}")
-            #self.history.update_chat_history(f"[color=dd2020]{myapp.connect_page.username.text}[/color] > {message}")
-            socket_client.send_chat_msg(message)
+        #❔🗣👂
+        self.users_list.add_text_row("[b]Can hear you [/b]", True)
+        for user in self.can_listen:
+            self.users_list.add_text_row(self.format_name(str(user)), True)
 
+        #self.users_list.add_text_row("\n[b]Eavesdroppers[/b]", True)
+        #for user in self.can_listen - self.can_speak:
+        #    self.users_list.add_text_row(self.format_name(str(user)), True)
+        #(They can't hear you, but you could be their Eavesdroppe)
+        #self.users_list.add_text_row("\n[b]Distant Users[/b]", True)
+        #for user in self.users - self.can_listen - self.can_speak:
+        #    self.users_list.add_text_row(self.format_name(str(user)), True)
         
+        if len(self.structure):
+            self.users_list.add_text_row("\n\n[b]Hierarchy[/b]", True)
+            self.users_list.add_text_row(self.make_preaty_string(self.structure), True)
+            
+    def make_preaty_string(self, structure, level=1):
+        string = ""
+        line = "|"
+        room_symbol = "v"
+        indent = ""
+        if level > 1:
+            indent += (line + " ") * (level - 1)
+        for entry in structure:
+            if not isinstance(entry, list):
+                string = string + indent + self.format_name(str(entry)) + "\n"
+            else:
+                string = string + indent + room_symbol + "\n" + self.make_preaty_string(entry, level + 1)
+        return string
+
 class InfoPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -233,7 +366,23 @@ class MyApp(App):
         screen.add_widget(self.chat_page)
         self.screen_manager.add_widget(screen)
 
-        self.audio = audiohelper.Audio()
+        callback_handler.register(UserActionCodes.JOIN, myapp.connect_page.save_ip_port_and_name)
+
+        callback_handler.register(BasicCallCodes.LOG_DEBUG, lambda msg_str:print(f"DEBUG: {msg_str}"))
+        callback_handler.register(BasicCallCodes.LOG_INFO, lambda msg_str:print(f"INFO: {msg_str}"))
+        callback_handler.register(BasicCallCodes.LOG_WARNING, lambda msg_str:print(f"WARN: {msg_str}"))
+        callback_handler.register(BasicCallCodes.LOG_ERROR, lambda msg_str:print(f"ERROR: {msg_str}"))
+
+        callback_handler.register(ViewCallCodes.NEW_SYS_MSG, lambda message_str:self.chat_page.history.add_text_row(f"[color=00ff00]{escape_markup(message_str)}[/color]", True))
+        callback_handler.register(ViewCallCodes.NEW_CHAT_MSG, self.chat_page.new_chat_msg)
+        
+        callback_handler.register(ViewCallCodes.UPDATE_USERS_LISTENING, lambda can_listen, can_speak:self.chat_page.update_users_all(None, can_listen, can_speak, None))
+        callback_handler.register(ViewCallCodes.UPDATE_USERS_ALL, lambda users_list:self.chat_page.update_users_all(users_list, None, None, None))
+        callback_handler.register(ViewCallCodes.UPDATE_USERS_STRUCTURE, lambda structure:self.chat_page.update_users_all(None, None, None, structure))
+        
+        callback_handler.register(ViewCallCodes.CONNECTION_CLOSED, lambda :self.error_handler.show_error("Connection with server closed"))
+        callback_handler.register(ViewCallCodes.CONNECTED_TO_SERVER, lambda :change_screen("Chat"))
+
 
         return self.screen_manager
 
@@ -242,25 +391,33 @@ class ErrorHandler:
         self.countdown = 5
         self.error_msg = error_msg
         self.updateclockthing = Clock.schedule_interval(self.show_error_update_text, 1)
-        myapp.screen_manager.current = "Info"
-        Clock.schedule_once(self.show_error_connect_proxy, 5.5)
+        change_screen("Info")
+        Clock.schedule_once(lambda _: change_screen("Connect"), 5.5)
 
     def show_error_update_text(self, _):
         myapp.info_page.update_info(self.error_msg + f"\nReturning to Front page in {self.countdown}")
         self.countdown -= 1
         if self.countdown <= 0:
             return False
-    
-    def show_error_connect_proxy(self, _):
-        myapp.screen_manager.current = "Connect"
+
+def change_screen(name_str):
+    global myapp
+    myapp.screen_manager.current = name_str
+    if name_str == "Chat":
+        myapp.chat_page.set_username(myapp.connect_page.username.text)
+        myapp.chat_page.history.clear_content()
+        myapp.chat_page.users_list.clear_content()
 
 myapp = None
+callback_handler = None
 
-def main():
+def setup(callback_handler_in):
     global myapp
+    global callback_handler
+    callback_handler = callback_handler_in
 
     myapp = MyApp()
     myapp.run()
 
-if __name__ == "__main__":
-    main()
+#if __name__ == "__main__":
+#    setup()

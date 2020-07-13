@@ -5,7 +5,6 @@ from enum import Enum, auto
 PRE_HEADER_LENGTH = 2
 
 # Returns (header_obj, body_ba, ReturnCode, error_str)
-# header_obj == false -> error
 def receive(sock):
     #print(f"\n{sock.getpeername()[0]}:{sock.getpeername()[1]}: Trying to receive message")
     print(f"\nTrying to receive message")
@@ -45,8 +44,9 @@ def receive(sock):
             body_ba, return_code, error_str = _receive(sock, header_obj["Content-Length"], "body")
             if return_code != ReturnCode.SUCCESS:
                 return error(return_code, error_str)
+            return success((header_obj, body_ba))
 
-    return success((header_obj, body_ba))
+    return success((header_obj, None))
 
 def _receive(sock, number_of_bytes_int, type_hint="data"):
     data_ba = bytearray()
@@ -67,12 +67,15 @@ def _receive(sock, number_of_bytes_int, type_hint="data"):
         return should_close(f"Exception while recieving {type_hint}  Exception: {e}")
 
 # Returns number of cycles needed to transmit data
-def send(pydict, body_bytearray, to_socket, max_tries=30):
+def send(pydict, body_bytearray, to_socket, has_body_by = True, max_tries=30):
     if not isinstance(body_bytearray, bytearray) and not isinstance(body_bytearray, bytes):
-        if isinstance(body_bytearray, type(None)):
-            body_bytearray = bytearray()
+        if has_body_by:
+            return warning(f"It was specified that the message will have a body, but it was not suplied")
         else:
-            return warning(f"Can only send body of type bytearray or bytes, actual type {type(body_bytearray)}")
+            if isinstance(body_bytearray, type(None)):
+                body_bytearray = bytearray()
+            else:
+                return warning(f"Can only send body of type bytearray or bytes, actual type {type(body_bytearray)}")
     
     if not isinstance(to_socket, socket.socket):
         return warning(f"Can't send data to a non socket object, actual type {type(to_socket)}")
@@ -106,25 +109,28 @@ def send(pydict, body_bytearray, to_socket, max_tries=30):
 
 # Returns number of cycles needed to transmit data
 def _send(sock, data_bytearray, max_tries):
-    bytes_sent = 0
-    curr_try = 0
+    try:
+        bytes_sent = 0
+        curr_try = 0
 
-    while bytes_sent < len(data_bytearray) and max_tries != curr_try:
-        bytes_sent += sock.send(data_bytearray[bytes_sent:])
-        curr_try += 1
+        while bytes_sent < len(data_bytearray) and max_tries != curr_try:
+            bytes_sent += sock.send(data_bytearray[bytes_sent:])
+            curr_try += 1
 
-    if curr_try is max_tries:
-        print(f"{sock.getpeername()[0]}:{sock.getpeername()[1]} Stopped sending data")
-        return should_close(f"Could not send complete data in {curr_try} tries")
-    else:
-        return success(curr_try)
+        if curr_try is max_tries:
+            print(f"{sock.getpeername()[0]}:{sock.getpeername()[1]} Stopped sending data")
+            return should_close(f"Could not send complete data in {curr_try} tries")
+        else:
+            return success(curr_try)
+    except Exception as e:
+        return should_close(f"Exception while sending data  Exception: {e}")
 
 def deserialize(serialized_dict):
     try:
         deserialized_dict = json.loads(serialized_dict.decode("utf-8"))
         return success(deserialized_dict)
     except Exception as e:
-        return should_close(f"Exception while decoding data of type {type(serialized_dict)} from json to python dict object  Exception: {e}")
+        return should_close(f"Exception while decoding data of type {type(serialized_dict)} containing |{serialized_dict}| from json to python dict object  Exception: {e}")
 
 def serialize(pydict):
     try:

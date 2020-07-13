@@ -2,181 +2,232 @@ import socket
 import errno
 import json
 from threading import Thread
-import pyaudio
 import socket_util
 from socket_util import ReturnCode, success, error, connection_broken, should_close
-from enum import Enum, auto
+from Client.client_controller_util import BackendCallCodes, ViewCallCodes
+from callback_handler import BasicCallCodes
 
 #IP = "127.0.0.1"
 #PORT = 20030
 
-_should_listen = False
-client_socket = None
-#callback_handler = CallbackHandler({CallCodes.NEW_CHAT_MSG: list(), CallCodes.NEW_CHAT_AUDIO: list(), CallCodes.NEW_SYS_MSG: list(), CallCodes.LOG_DEBUG: list(), CallCodes.LOG_INFO: list(), CallCodes.LOG_WARNING: list(), CallCodes.LOG_ERROR: list(), CallCodes.CONNECTION_CLOSED:list()})
-#(origin_user_str, message_str)
-class CallbackHandler(dict):
-    def __init__(self, iterable):
-        super().__init__(iterable)
-    
-    def register(self, sub_type, function):
-        if sub_type in self:
-            self[sub_type].append(function)
-            return
-        print(f"Unable to register {function} to subscribe type {sub_type}: Subscribe type does not exist")
-    
-    def unregister(self, sub_type, function):
-        if sub_type in self:
-            if function in self[sub_type]:
-                self[sub_type].remove(function)
-                return
-        print(f"Unable to unregister {function} from subscribe type {sub_type}")
-    
-    def run(self, sub_type, args):
-        if sub_type in self:
-            for cb in self[sub_type]:
-                cb(args)
-            return
-        print(f"Unable to run functions in subscribe type {sub_type}: Subscribe type does not exist")
+callback_handler = None
 
-class CallCodes(Enum):
-    NEW_CHAT_MSG = auto()
-    NEW_CHAT_AUDIO = auto()
-    NEW_SYS_MSG = auto()
-    LOG_DEBUG = auto()
-    LOG_INFO = auto()
-    LOG_WARNING = auto()
-    LOG_ERROR = auto()
-    CONNECTION_CLOSED = auto()
-
-# Returns
-# (socket, return_code, error_str)
-def _connect(ip, port): 
-    global client_socket
-
-    try:
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        #client_socket.setblocking(False)
-        client_socket.connect((ip, port))
-        return True
-    except Exception as e:
-        callback_handler.run(CallCodes.LOG_ERROR, f"Error while trying to establish connection with server with  ip:{ip}  port:{port} Exception: {e}")
-        return False
-        #return connection_broken(f"Connection error: {str(e)}")
-    
-def send_chat_msg(message):
-    socket_util.send({"type":"chat_msg_post"}, message.encode("utf-8"), client_socket)
-
-def send_audiochunk(audiobytes, frame_count, time_info, status, chunk, width, channels, rate):
-    socket_util.send( \
-        {"type":"chat_audio_post", "frame_count":frame_count, "time_info":time_info, "status":status, "chunk": chunk, "width": width, "channels":channels, "rate":rate}, \
-        audiobytes, \
-        client_socket \
-        )
-
-def set_username(username):
-    socket_util.send({"type":"set_username"}, username.encode("utf-8"), client_socket)
-
-def send(pydict, body_bytearray, to_socket, max_tries=30):
-    rep, return_code, error_str = socket_util.send(pydict, body_bytearray, to_socket, max_tries)
+def handle_socket_util_res(res):
+    data, return_code, error_str = res
     if return_code != ReturnCode.SUCCESS:
         if return_code in [ReturnCode.SHOULD_CLOSE, ReturnCode.CONNECTION_BROKEN]:
-            callback_handler.run(CallCodes.LOG_ERROR, f"{return_code}::{error_str}")
-            callback_handler.run(CallCodes.LOG_DEBUG, "Calling stop_litening() after error sending message")
-            stop()
+            callback_handler.run(BasicCallCodes.LOG_ERROR, f"{return_code}::{error_str}")
+            callback_handler.run(BasicCallCodes.LOG_DEBUG, "Calling stop() after error in socket_util")
+            callback_handler.run(BackendCallCodes.CLOSE_CONNECTION)
         elif return_code is ReturnCode.WARNING:
-            callback_handler.run(CallCodes.LOG_WARNING, error(return_code, error_str))
+            callback_handler.run(BasicCallCodes.LOG_WARNING, f"{return_code}::{error_str}")
         else:
-            callback_handler.run(CallCodes.LOG_DEBUG, f"{return_code}::{error_str}")
+            callback_handler.run(BasicCallCodes.LOG_DEBUG, f"{return_code}::{error_str}")
+        return None
+    return data
 
-# Makes the listening thread eventualy stop, speeds it up by closing connection -> client_socket.recv() will porbubly return
-def stop():
-    global client_socket
-    global _should_listen
 
-    callback_handler.run(CallCodes.LOG_DEBUG, "Start of stop listening method")
+class ClientObject():
+    def __init__(self, callback_handler_in):
+        global callback_handler
+        self.client_socket = None
+        self._should_listen = False
+        callback_handler = callback_handler_in
 
-    _should_listen = False
+        self.callback_handler = callback_handler_in
 
-    if client_socket != None:
-        callback_handler.run(CallCodes.LOG_DEBUG, "Closing socket from stop listening method")
-        _close_connection()
+        self.processor = Processor(self.callback_handler)
+        self.sender = Sender(self.callback_handler, self)
 
-    callback_handler.run(CallCodes.LOG_DEBUG, "End of stop listening method")
+        self.callback_handler.register(BackendCallCodes.START_CONNECTION, self.start)
+        self.callback_handler.register(BackendCallCodes.CLOSE_CONNECTION, self.stop)
     
-    client_socket = None
+    # Listen for incomming messages
+    def listen(self):
+        self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Start of listening method/thread")
 
-# Connects to server and starts listening function in a thread
-def start(ip, port):
-    global _should_listen
+        # loop over received messages
+        while self._should_listen:
+            data = handle_socket_util_res(socket_util.receive(self.client_socket))
 
-    if _connect(ip, port):
-        callback_handler.run(CallCodes.LOG_DEBUG, "Starting listening thread")
-        _should_listen = True
-        Thread(target=listen, daemon=True).start()
-        return True
-    else:
-        stop()
-        return False
+            self.processor.process(data)
+        
+        if self.client_socket != None:
+            self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Closing socket from listening method/thread")
+            self._close_connection()
+        
+        self.client_socket = None
 
-# Listen for incomming messages
-def listen():
-    global client_socket
-    global callback_handler
+        self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "End of listening method/thread")
+
+    # Connects to server and starts listening function in a thread
+    def start(self, ip, port):
+        if self._connect(ip, port):
+            self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Starting listening thread")
+            self._should_listen = True
+            Thread(target=self.listen, daemon=True).start()
+            self.callback_handler.run(ViewCallCodes.CONNECTED_TO_SERVER)
+        else:
+            return False
     
-    callback_handler.run(CallCodes.LOG_DEBUG, "Start of listening method/thread")
+    def _connect(self, ip, port): 
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            #client_socket.setblocking(False)
+            self.client_socket.connect((ip, port))
+            return True
+        except Exception as e:
+            self.callback_handler.run(BasicCallCodes.LOG_ERROR, f"Error while trying to establish connection with server with  ip:{ip}  port:{port} Exception: {e}")
+            return False
+            #return connection_broken(f"Connection error: {str(e)}")
+    
+    # Makes the listening thread eventualy stop, speeds it up by closing connection -> client_socket.recv() will porbubly return
+    def stop(self):
+        self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Start of stop listening method")
 
-    tranlate_dict = {\
-        "chat_msg_dist"     :CallCodes.NEW_CHAT_MSG, \
-        "chat_audio_dist"   :CallCodes.NEW_CHAT_AUDIO, \
-        "sys_msg_dist"      :CallCodes.NEW_SYS_MSG}
+        self._should_listen = False
 
-    # Now we want to loop over received messages
-    while _should_listen:
-        data, return_code, error_str = socket_util.receive(client_socket)
+        if self.client_socket != None:
+            self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Closing socket from stop listening method")
+            self._close_connection()
 
-        if return_code != ReturnCode.SUCCESS:
-            if return_code in [ReturnCode.SHOULD_CLOSE, ReturnCode.CONNECTION_BROKEN]:
-                callback_handler.run(CallCodes.LOG_ERROR, f"{return_code}::{error_str}")
-                callback_handler.run(CallCodes.LOG_DEBUG, "Listening tread calling stop_litening()")
-                stop()
+        self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "End of stop listening method")
+        
+        self.client_socket = None
+    
+    def _close_connection(self):
+        self.client_socket
+
+        if self.client_socket != None:
+            self.client_socket.shutdown(socket.SHUT_RDWR)
+            self.client_socket.close()
+            self.client_socket = None
+
+        self.callback_handler.run(ViewCallCodes.CONNECTION_CLOSED)
+        self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Closed socket")
+
+
+class Processor():
+    def __init__(self, callback_handler_in):
+        self.callback_handler = callback_handler_in
+
+        self.callback_handler.add_callcodes(["sys_msg_dist", "chat_msg_dist", "chat_audio_dist", "update_users_all", "update_users_listening"])
+
+        self.callback_handler.register("sys_msg_dist", self.process_sys_msg_dist)
+        self.callback_handler.register("chat_msg_dist", self.process_chat_msg_dist)
+        self.callback_handler.register("chat_audio_dist", self.process_chat_audio_dist)
+        self.callback_handler.register("update_users_all", self.process_update_users_all)
+        self.callback_handler.register("update_users_listening", self.process_update_users_listening)
+
+    def process(self, data):
+        if data != None:
+            header_obj, *body_ba = data
+
+            if "type" in header_obj:
+                msg_type = header_obj["type"]
+
+                if not self.callback_handler.run(msg_type, *data):
+                    self.callback_handler.run(BasicCallCodes.LOG_WARNING, "Unknown message type")
+            else:
+                self.callback_handler.run(BasicCallCodes.LOG_WARNING, "Can't process data that doesn't contain message type in header")
+    
+    def process_sys_msg_dist(self, header_obj, body_by):
+        message_str = str(handle_socket_util_res(socket_util.deserialize(body_by)))
+        if message_str != None:
+            self.callback_handler.run(ViewCallCodes.NEW_SYS_MSG, message_str)
+
+    def process_chat_msg_dist(self, header_obj, body_by):
+        user_str = header_obj["from_user"]
+        message_str = str(handle_socket_util_res(socket_util.deserialize(body_by)))
+        if message_str != None:
+            self.callback_handler.run(ViewCallCodes.NEW_CHAT_MSG, user_str, message_str)
+
+    def process_chat_audio_dist(self, header_obj, body_by):
+        # user_str, stream_bytes, rate_int, frame_count_int, width_int, channels_int, chunk_size_int, status_enum, time_info_dict
+        user_str = header_obj["from_user"]
+        level = 0
+        next_index = 0
+        for b in body_by:
+            next_index += 1
+            if b == '{'.encode("utf-8")[0]:
+                level += 1
+            elif b == '}'.encode("utf-8")[0]:
+                level -= 1
+            if level == 0:
                 break
-            elif return_code is ReturnCode.WARNING:
-                callback_handler.run(CallCodes.LOG_WARNING, f"{return_code}::{error_str}")
+        
+        audio_info = handle_socket_util_res(socket_util.deserialize(body_by[:next_index]))
+
+        if audio_info != None:
+            #{"frame_count":frame_count, "time_info":time_info, "status":status, "chunk": chunk, "width": width, "channels":channels, "rate":rate} + audiobytes
+            rate_int = audio_info["rate"]
+            frame_count_int = audio_info["frame_count"]
+            width_int = audio_info["width"]
+            channels_int = audio_info["channels"]
+            chunk_size_int = audio_info["chunk"]
+            status_enum = audio_info["status"]
+            time_info_dict = audio_info["time_info"]
+
+            stream_bytes = body_by[next_index:]
+            if len(stream_bytes) == width_int * chunk_size_int * channels_int:
+                self.callback_handler.run(ViewCallCodes.NEW_CHAT_AUDIO, user_str, stream_bytes, rate_int, frame_count_int, width_int, channels_int, chunk_size_int, status_enum, time_info_dict)
             else:
-                callback_handler.run(CallCodes.LOG_DEBUG, f"{return_code}::{error_str}")
+                self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Recieved audio's length does not match the given format")
         else:
-            header_obj, body_ba = data
+            self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Unable to deserialize audio info")
 
-            msg_type = header_obj["type"]
-
-            if msg_type in tranlate_dict:
-                callback_handler.run(tranlate_dict[msg_type], data)
-            else:
-                callback_handler.run(CallCodes.LOG_INFO, "Unknown message type")
-    
-    if client_socket != None:
-        callback_handler.run(CallCodes.LOG_DEBUG, "Closing socket from listening method/thread")
-        _close_connection()
-    
-    client_socket = None
-
-    callback_handler.run(CallCodes.LOG_DEBUG, "End of listening method/thread")
-
-def _close_connection():
-    global client_socket
-
-    if client_socket != None:
-        client_socket.shutdown(socket.SHUT_RDWR)
-        client_socket.close()
-        client_socket = None
-
-    callback_handler.run(CallCodes.CONNECTION_CLOSED, False)
-    callback_handler.run(CallCodes.LOG_DEBUG, "Closed socket")
+    def process_update_users_all(self, header_obj, body_by):
+        body_obj = handle_socket_util_res(socket_util.deserialize(body_by))
+        if body_obj != None:
+            if "type" in body_obj:
+                if "users" in body_obj:
+                    if body_obj["type"] == "full":
+                        self.callback_handler.run(ViewCallCodes.UPDATE_USERS_ALL, body_obj["users"])
+                if "structure" in body_obj:
+                    if body_obj["type"] == "structure":
+                        self.callback_handler.run(ViewCallCodes.UPDATE_USERS_STRUCTURE, body_obj["structure"])
 
 
 
+    def process_update_users_listening(self, header_obj, body_by):
+        body_obj = handle_socket_util_res(socket_util.deserialize(body_by))
+        if body_obj != None:
+            if "can_listen" in body_obj and "can_speak" in body_obj:
+                self.callback_handler.run(ViewCallCodes.UPDATE_USERS_LISTENING, body_obj["can_listen"], body_obj["can_speak"])
 
-callback_handler = CallbackHandler({})
 
-for e in CallCodes:
-    callback_handler[e] = list()
+class Reciever():
+    def __init__(self):
+        pass
+
+
+class Sender():
+    def __init__(self, callback_handler_in, clientobject):
+        self.callback_handler = callback_handler_in
+        self.clientobject = clientobject
+
+        self.callback_handler.register(BackendCallCodes.SEND_CHAT_MSG, self.send_chat_msg)
+        self.callback_handler.register(BackendCallCodes.SEND_CHAT_AUDIO, self.send_audiochunk)
+        self.callback_handler.register(BackendCallCodes.SEND_TALK_REQUEST, self.send_talk_request)
+        self.callback_handler.register(BackendCallCodes.SET_USERNAME, self.set_username)
+        self.callback_handler.register(BackendCallCodes.EXIT_ROOM, self.exit_room)
+        
+
+    def send_talk_request(self, move_to_id):
+        handle_socket_util_res(socket_util.send({"type":"talk_request"}, handle_socket_util_res(socket_util.serialize(move_to_id)), self.clientobject.client_socket))
+
+    def exit_room(self):
+        handle_socket_util_res(socket_util.send({"type":"exit_room"}, None, self.clientobject.client_socket, False))
+
+    def send_chat_msg(self, message):
+        handle_socket_util_res(socket_util.send({"type":"chat_msg_post"}, handle_socket_util_res(socket_util.serialize(message)), self.clientobject.client_socket))
+
+    def send_audiochunk(self, audiobytes, rate, frame_count, width, channels, chunk, status, time_info): # (stream_bytes, rate_int, frame_count_int, width_int, channels_int, chunk_size_int, status_enum, time_info_dict)
+        handle_socket_util_res(socket_util.send( \
+            {"type":"chat_audio_post"}, \
+            handle_socket_util_res(socket_util.serialize({"frame_count":frame_count, "time_info":time_info, "status":status, "chunk": chunk, "width": width, "channels":channels, "rate":rate})) + audiobytes, \
+            self.clientobject.client_socket \
+            ))
+
+    def set_username(self, username):
+        handle_socket_util_res(socket_util.send({"type":"set_username"}, handle_socket_util_res(socket_util.serialize(username)), self.clientobject.client_socket))

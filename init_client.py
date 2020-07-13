@@ -1,3 +1,3 @@
-import Client.chatroom as chatroom
+import Client.client_controller as controller
 
-chatroom.run()
+controller.main()
