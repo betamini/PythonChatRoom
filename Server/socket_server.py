@@ -27,22 +27,6 @@ def handle_socket_util_res(res, relevant_socket=None):
         return None
     return data
 
-"""
-def start(callbackhandler):
-    Thread(target=serve,args=callbackhandler, daemon=True).start()
-
-def serve(callbackhandler):
-    with ServerObject(callbackhandler) as server_object:
-        while should_serve:
-            do server stuff
-
-class ServerObject:
-    def __enter__():
-        pass
-    
-    def __exit__():
-        pass
-"""
 class SocketsManager(list):
     def __init__(self, callback_handler_in):
         super().__init__()
@@ -50,20 +34,15 @@ class SocketsManager(list):
 
     def __enter__(self):
         self.callback_handler.register(BackendCallCodes.ACCEPT_SPECIFIC_SOCKET, self.accept_specific_socket) # (socket)
-        self.callback_handler.register(BackendCallCodes.CLOSE_SPECIFIC_SOCKET, self.close_specific_socket) # (socket)
+        self.callback_handler.register(BackendCallCodes.CLOSE_SPECIFIC_SOCKET, self.close_specific_socket) # (socket[, remove_socket=True])
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.callback_handler.unregister(BackendCallCodes.ACCEPT_SPECIFIC_SOCKET, self.accept_specific_socket) # (socket)
-        self.callback_handler.unregister(BackendCallCodes.CLOSE_SPECIFIC_SOCKET, self.close_specific_socket) # (socket)
+        self.callback_handler.unregister(BackendCallCodes.CLOSE_SPECIFIC_SOCKET, self.close_specific_socket) # (socket[, remove_socket=True])
         for wild_socket in self:
-            if isinstance(wild_socket, socket.socket):
-                if wild_socket.fileno() != -1:
-                    try:
-                        wild_socket.shutdown(socket.SHUT_RDWR)
-                    except OSError as e:
-                        self.callback_handler.run(BasicCallCodes.LOG_ERROR, f"Error while trying to shutdown(socket.SHUT_RDWR) {wild_socket} Exception: {e}")
-                    wild_socket.close()
+            self.callback_handler.run(BackendCallCodes.CLOSE_SPECIFIC_SOCKET, wild_socket)
+            self.close_specific_socket(wild_socket, False)
         self.clear()
         if not (exc_type == None and exc_value == None and traceback == None):
             self.callback_handler.run(BasicCallCodes.LOG_ERROR, f"SocketManager exited with error!\nExceptionType: {exc_type}\nExceptionValue: {exc_value}\nTraceback: {traceback}")
@@ -73,7 +52,7 @@ class SocketsManager(list):
         self.append(socket_to_accept)
     
     # Can't be used in a for loop which loops throug one of the things that it removes the socket from. eg self.socket_list, self.socket_to_uid_and_name
-    def close_specific_socket(self, socket_to_close):
+    def close_specific_socket(self, socket_to_close, remove_socket=True):
         if isinstance(socket_to_close, socket.socket):
             if socket_to_close.fileno() != -1:
                 try:
@@ -81,15 +60,15 @@ class SocketsManager(list):
                 except Exception as e:
                     self.callback_handler.run(BasicCallCodes.LOG_ERROR, f"Error while trying to shutdown(socket.SHUT_RDWR) {socket_to_close}  Exception: {e}")
                 socket_to_close.close()
-        self.remove(socket_to_close)
+        if remove_socket:
+            self.remove(socket_to_close)
 
 class ServerObject:
-    def __init__(self, callback_handler_in, sockets_manager, processor, ip, port):
+    def __init__(self, callback_handler_in, sockets_manager, ip, port):
         global callback_handler
         callback_handler = callback_handler_in
         self.callback_handler = callback_handler_in
         self.sockets_manager = sockets_manager
-        self.processor = processor
         
         socket.setdefaulttimeout(0)
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -109,7 +88,8 @@ class ServerObject:
         
         if not (exc_type == None and exc_value == None and traceback == None):
             self.callback_handler.run(BasicCallCodes.LOG_ERROR, f"Server exited with error!\nExceptionType: {exc_type}\nExceptionValue: {exc_value}\nTraceback: {traceback}")
-        return True
+        #return True
+        return False
 
     def stop(self):
         self._should_serve = False
@@ -143,35 +123,39 @@ class ServerObject:
         
         for notified_socket in read_sockets:
             if notified_socket is self.server_socket:
-                client_socket, client_address = self.server_socket.accept()
+                client_socket, _ = self.server_socket.accept()
 
                 self.callback_handler.run(BasicCallCodes.LOG_INFO, f"{client_socket} Connection accepted")
                 self.callback_handler.run(BackendCallCodes.ACCEPT_SPECIFIC_SOCKET, client_socket)
             else:
                 data = handle_socket_util_res(socket_util.receive(notified_socket), notified_socket)
-                self.processor.process(data, notified_socket)
-                if data != None:
-                    header_obj, body_ba = data
+                self.callback_handler.run(BackendCallCodes.PROCESS_DATA, data, notified_socket)
+                # if data != None:
+                #     header_obj, body_ba = data
 
-                    if "type" in header_obj:
-                        print(f"{notified_socket.getpeername()[0]}:{notified_socket.getpeername()[1]}({notified_socket}) Recieved message  Type: {header_obj['type']}")
+                #     if "type" in header_obj:
+                #         print(f"{notified_socket.getpeername()[0]}:{notified_socket.getpeername()[1]}({notified_socket}) Recieved message  Type: {header_obj['type']}")
 
-                        if header_obj["type"] in self.handle_data_type:
-                            self.callback_handler.run(self.handle_data_type[header_obj["type"]], header_obj, body_ba, notified_socket)
-                        else:
-                            print(f"Unrecougnisable data  Type: {header_obj['type']}")
+                #         if header_obj["type"] in self.handle_data_type:
+                #             self.callback_handler.run(self.handle_data_type[header_obj["type"]], header_obj, body_ba, notified_socket)
+                #         else:
+                #             print(f"Unrecougnisable data  Type: {header_obj['type']}")
 
 class Processor():
-    def __init__(self, callback_handler_in):
+    def __init__(self, action, callback_handler_in, ):
         self.callback_handler = callback_handler_in
+        self.action = action
 
         self.callback_handler.add_callcodes(["chat_msg_post", "chat_audio_post", "talk_request", "exit_room", "set_username"])
 
-        self.callback_handler.register("chat_msg_post", self.process_chat_msg_post)
-        self.callback_handler.register("chat_audio_post", self.process_chat_audio_post)
-        self.callback_handler.register("talk_request", self.process_talk_request)
-        self.callback_handler.register("exit_room", self.process_exit_room)
-        self.callback_handler.register("set_username", self.process_set_username)
+        self.callback_handler.register("chat_msg_post", self.process_chat_msg_post) # (header_obj, body_ba, source_socket)
+        self.callback_handler.register("chat_audio_post", self.process_chat_audio_post) # (header_obj, body_ba, source_socket)
+        self.callback_handler.register("talk_request", self.process_talk_request) # (header_obj, body_ba, source_socket)
+        self.callback_handler.register("exit_room", self.process_exit_room) # (header_obj, body_ba, source_socket)
+        self.callback_handler.register("set_username", self.process_set_username) # (header_obj, body_ba, source_socket)
+
+        self.callback_handler.register(BackendCallCodes.PROCESS_DATA, self.process) # ( # (data, source_socket))
+
 
         # TODO
         # Lag en callback til process funksjonen
@@ -186,13 +170,10 @@ class Processor():
 
         # self.callback_handler.register(BackendCallCodes.HANDLE_CHAT_MSG, self.handle_chat_msg_post)  # (header_obj, body_bytearray, from_socket)
         # self.callback_handler.register(BackendCallCodes.HANDLE_CHAT_AUDIO, self.handle_chat_audio_post)  # (header_obj, body_bytearray, from_socket)
-        # self.callback_handler.register(BackendCallCodes.HANDLE_SET_USERNAME, self.handle_set_username_post)  # (header_obj, body_bytearray, from_socket)
-        # self.callback_handler.register(BackendCallCodes.HANDLE_TALK_REQUEST, self.handle_talk_request)  # (header_obj, body_bytearray, from_socket)
-        # self.callback_handler.register(BackendCallCodes.HANDLE_EXIT_ROOM, self.handle_exit_room)  # (header_obj, body_bytearray, from_socket)
-    
+        # 
     def process(self, data, source_socket):
         if data != None:
-            header_obj, *body_ba = data
+            header_obj, body_ba = data
 
             if "type" in header_obj:
                 msg_type = header_obj["type"]
@@ -202,59 +183,71 @@ class Processor():
             else:
                 self.callback_handler.run(BasicCallCodes.LOG_WARNING, "Can't process data that doesn't contain message type in header")
 
-    def process_chat_msg_post(self, header_obj, body_by):
-        pass
-    def handle_chat_msg_post(self, _, body_bytearray, source_socket):
-        source_item = self.itemmanager.get_item(source_socket)
-        source_socket, source_name_str = source_item.data
-        for dest_item in self.roommanager.get_items_near(source_item, True):
-            dest_socket, dest_str = dest_item.data
-            self.callback_handler.run(BackendCallCodes.SEND_CHAT_MSG, None, body_bytearray, source_name_str, dest_socket)
+    def process_chat_msg_post(self, header_obj, body_by, source_socket):
+        self.action.forward_chat_msg(body_by, source_socket)
+    
+    # def handle_chat_msg_post(self, _, body_bytearray, source_socket):
+    #     source_item = self.itemmanager.get_item(source_socket)
+    #     source_socket, source_name_str = source_item.data
+    #     for dest_item in self.roommanager.get_items_near(source_item, True):
+    #         dest_socket, dest_str = dest_item.data
+    #         self.callback_handler.run(BackendCallCodes.SEND_CHAT_MSG, None, body_bytearray, source_name_str, dest_socket)
     
 
-    def process_chat_audio_post(self, header_obj, body_by):
-        pass
-    def handle_chat_audio_post(self, _, body_bytearray, source_socket):
-        source_item = self.itemmanager.get_item(source_socket)
-        source_socket, source_name_str = source_item.data
-        for dest_item in self.roommanager.get_items_near(source_item, True):
-            dest_socket, dest_str = dest_item.data
-            self.callback_handler.run(BackendCallCodes.SEND_CHAT_AUDIO, None, body_bytearray, source_name_str, dest_socket)
-    
+    def process_chat_audio_post(self, header_obj, body_by, source_socket):
+        self.action.forward_chat_audio(body_by, source_socket)
 
-    def process_talk_request(self, header_obj, body_by):
-        pass
-    def handle_talk_request(self, header_obj, body_bytearray, from_socket):
-        data = handle_socket_util_res(socket_util.deserialize(body_bytearray), from_socket)
-        if data != None:
-            desierd_talk_item = self.itemmanager.get_item(data)
-            if desierd_talk_item != None:
-                self.move_user(self.itemmanager.get_item(from_socket), desierd_talk_item)
-            else:
-                self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Can't go to a room with someone who does not exist")
-                self.send_sys_msg(handle_socket_util_res(socket_util.serialize("Can't start a conversation with someone who doesn't exist")), from_socket)
+    # def handle_chat_audio_post(self, _, body_bytearray, source_socket):
+    #     source_item = self.itemmanager.get_item(source_socket)
+    #     source_socket, source_name_str = source_item.data
+    #     for dest_item in self.roommanager.get_items_near(source_item, True):
+    #         dest_socket, dest_str = dest_item.data
+    #         self.callback_handler.run(BackendCallCodes.SEND_CHAT_AUDIO, None, body_bytearray, source_name_str, dest_socket)
 
-    def process_exit_room(self, header_obj, body_by):
-        pass
-    def handle_exit_room(self, _, body_bytearray, from_socket):
-        self.roommanager.exit_room(self.itemmanager.get_item(from_socket))
-        self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_ALL)
-        self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_LISTENING)
 
-    def process_set_username(self, header_obj, body_by):
-        pass
-    def handle_set_username_post(self, _, body_bytearray, source_socket):
-        desiered_name_str = handle_socket_util_res(socket_util.deserialize(body_bytearray))
-        self.set_username(source_socket, desiered_name_str)
+    def process_talk_request(self, header_obj, body_by, source_socket):
+        self.action.handle_talk_request(handle_socket_util_res(socket_util.deserialize(body_by), source_socket), source_socket)
+
+    # def handle_talk_request(self, header_obj, body_bytearray, from_socket):
+    #     data = handle_socket_util_res(socket_util.deserialize(body_bytearray), from_socket)
+    #     if data != None:
+    #         desierd_talk_item = self.itemmanager.get_item(data)
+    #         if desierd_talk_item != None:
+    #             self.move_user(self.itemmanager.get_item(from_socket), desierd_talk_item)
+    #         else:
+    #             self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Can't go to a room with someone who does not exist")
+    #             message_bytearray = handle_socket_util_res(socket_util.serialize("Can't start a conversation with someone who doesn't exist"))
+    #             self.callback_handler.run(BackendCallCodes.SEND_SYS_MSG, message_bytearray)
+    #             #self.sender.send_sys_msg(message_bytearray, from_socket)
+
+    def process_exit_room(self, header_obj, body_by, source_socket):
+        self.action.handle_exit_room(source_socket)
+        
+    # def handle_exit_room(self, _, body_bytearray, from_socket):
+    #     self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_ALL)
+    #     self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_LISTENING)
+
+    def process_set_username(self, header_obj, body_by, source_socket):
+        self.action.handle_set_username(handle_socket_util_res(socket_util.deserialize(body_by), source_socket), source_socket)
+
+    # def handle_set_username_post(self, _, body_bytearray, source_socket):
+    #     desiered_name_str = handle_socket_util_res(socket_util.deserialize(body_bytearray))
+    #     self.set_username(source_socket, desiered_name_str)
 
 
 class Action():
-    def __init__(self, callback_handler_in):
+    def __init__(self, sender, callback_handler_in, itemmanager, roommanager):
         self.callback_handler = callback_handler_in
+        self.sender = sender
 
-        self.itemmanager = room_manager.ItemManager()
-        self.roommanager = room_manager.RoomManager(self.itemmanager)
+        self.itemmanager = itemmanager
+        self.roommanager = roommanager
         
+        #self.callback_handler.register(BackendCallCodes.ACTION_GLOBAL_MSG, self.brodcast_sys_msg) # (message_str)
+        #self.callback_handler.register(BackendCallCodes.ACTION_SET_USERNAME, self.set_username)  # (key_or_item, new_name)
+        #self.callback_handler.register(BackendCallCodes.ACTION_MOVE_USER, self.move_user)  # (source_key_or_item, dest_key_or_item)
+        #self.callback_handler.register(BackendCallCodes.ACTION_EXIT_ROOM, self.exit_room)  # (key_or_item)
+    
         self.callback_handler.register(BackendCallCodes.MOVE_USER, self.move_user)  # (source_item, destination_item)
         self.callback_handler.register(BackendCallCodes.SEND_UPDATE_USERS_ALL, self.update_users_all) # ()
         self.callback_handler.register(BackendCallCodes.SEND_UPDATE_USERS_LISTENING, self.update_users_listening) # ()
@@ -264,6 +257,18 @@ class Action():
 
         self.callback_handler.register(BackendCallCodes.START_SERVER, self.start_server) # (ip, port)
     
+    def start_server(self, ip, port):
+        def serving_loop():
+            with SocketsManager(self.callback_handler) as sockets_manager:
+                with ServerObject(self.callback_handler, sockets_manager, ip, port) as server:
+                    while server._should_serve:
+                        server.serve()
+            self.callback_handler.run(BasicCallCodes.LOG_DEBUG, f"Server thread ended")
+            
+
+        Thread(target=serving_loop, daemon=True).start()
+        self.callback_handler.run(BasicCallCodes.LOG_DEBUG, f"Started serving thread")
+
     def accept_specific_socket(self, socket_to_accept):
         client_item = self.roommanager.add_item()
         client_item.datakey = [socket_to_accept]
@@ -277,22 +282,74 @@ class Action():
         self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_ALL)
         self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_LISTENING)
 
+    def forward_chat_msg(self, body_by, source_socket):
+        source_item = self.itemmanager.get_item(source_socket)
+        source_socket, source_name_str = source_item.data
+        for dest_item in self.roommanager.get_items_near(source_item, True):
+            dest_socket, _ = dest_item.data
+            self.sender.send_chat_msg(body_by, source_name_str, dest_socket)
+    
+    def forward_chat_audio(self, body_by, source_socket):
+        source_item = self.itemmanager.get_item(source_socket)
+        source_socket, source_name_str = source_item.data
+        for dest_item in self.roommanager.get_items_near(source_item, True):
+            dest_socket, _ = dest_item.data
+            self.sender.send_chat_audio(body_by, source_name_str, dest_socket)
+
+    def handle_talk_request(self, requested_username_str, source_socket):
+        if requested_username_str != None:
+            desierd_talk_item = self.itemmanager.get_item(requested_username_str)
+            if desierd_talk_item != None:
+                self.move_user(self.itemmanager.get_item(source_socket), desierd_talk_item)
+            else:
+                self.callback_handler.run(BasicCallCodes.LOG_DEBUG, "Can't go to a room with someone who does not exist")
+                self.sender.send_sys_msg(handle_socket_util_res(socket_util.serialize("Can't start a conversation with someone who doesn't exist")), source_socket)
+
+    def handle_exit_room(self, source_socket):
+        self.roommanager.exit_room(self.itemmanager.get_item(source_socket))
+        self.update_users_all()
+        self.update_users_listening()
+
+    def handle_set_username(self, desiered_name_str, source_socket):
+        try:
+            temp = int(desiered_name_str)
+            message_bytearray = handle_socket_util_res(socket_util.serialize("Username can't be a numbers"))
+            #self.callback_handler.run(BackendCallCodes.SEND_SYS_MSG, message_bytearray, source_socket)
+            self.sender.send_sys_msg(message_bytearray, source_socket)
+        except Exception as e:
+            req_item = self.itemmanager.get_item(source_socket)
+            req_socket, req_item_name = req_item.data
+            if desiered_name_str == "" or len(desiered_name_str) > 30 or not isinstance(desiered_name_str, str):
+                message_bytearray = handle_socket_util_res(socket_util.serialize("Username can't be empty or longer then 30 characters"))
+                #self.callback_handler.run(BackendCallCodes.SEND_SYS_MSG, message_bytearray, source_socket)
+                self.sender.send_sys_msg(message_bytearray, source_socket)
+            else:
+                availible = True
+
+                if self.itemmanager.get_item(desiered_name_str) != None:
+                    availible = False
+                    message_bytearray = handle_socket_util_res(socket_util.serialize("Someone already has that username"))
+                    #self.callback_handler.run(BackendCallCodes.SEND_SYS_MSG, message_bytearray, source_socket)
+                    self.sender.send_sys_msg(message_bytearray, source_socket)
+
+                if availible:
+                    req_item.data = (req_socket, desiered_name_str)
+                    req_item.datakey = [req_socket, desiered_name_str]
+
+                    if req_item_name == None:
+                        rep_body_str = f"{desiered_name_str} joined the chatroom"
+                    else:
+                        rep_body_str = f"{req_item_name} was renamed to {desiered_name_str}"
+
+                    #self.callback_handler.run(BackendCallCodes.SEND_SYS_MSG, rep_body_str)
+                    self.brodcast_sys_msg(rep_body_str)
+                    self.update_users_all()
+                    self.update_users_listening()
+
     def move_user(self, source, destination):
         self.roommanager.move_to(source, destination)
-        self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_ALL)
-        self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_LISTENING)
-
-    def start_server(self, ip, port):
-        def serving_loop():
-            with SocketsManager(self.callback_handler) as sockets_manager:
-                with ServerObject(self.callback_handler, sockets_manager, ip, port) as server:
-                    while server._should_serve:
-                        server.serve()
-            self.callback_handler.run(BasicCallCodes.LOG_DEBUG, f"Server thread ended")
-            
-
-        Thread(target=serving_loop, daemon=True).start()
-        self.callback_handler.run(BasicCallCodes.LOG_DEBUG, f"Started serving thread")
+        self.update_users_all()
+        self.update_users_listening()  
 
     def update_users_all(self):
         self.roommanager.print_formated()
@@ -348,64 +405,31 @@ class Action():
             content = {"can_listen": can_listen_pros, "can_speak": can_speak_pros}
             body_bytearray = handle_socket_util_res(socket_util.serialize(content), item_socket)
             handle_socket_util_res(socket_util.send({"type":"update_users_listening"}, body_bytearray, item_socket), item_socket)
-    
-    def set_username(self, requesting_socket, desiered_name_str):
-        try:
-            temp = int(desiered_name_str)
-            self.send_sys_msg(handle_socket_util_res(socket_util.serialize("Username can't be only numbers")), requesting_socket)
-        except Exception as e:
-            req_item = self.itemmanager.get_item(requesting_socket)
-            req_socket, req_item_name = req_item.data
-            if desiered_name_str == "" or len(desiered_name_str) > 30 or not isinstance(desiered_name_str, str):
-                self.send_sys_msg(handle_socket_util_res(socket_util.serialize("Username can't be empty or longer then 30 characters")), requesting_socket)
-            else:
-                availible = True
-
-                if self.itemmanager.get_item(desiered_name_str) != None:
-                    availible = False
-                    self.send_sys_msg(handle_socket_util_res(socket_util.serialize("Someone already has that username")), requesting_socket)
-
-                if availible:
-                    req_item.data = (req_socket, desiered_name_str)
-                    req_item.datakey = [req_socket, desiered_name_str]
-
-                    if req_item_name == None:
-                        rep_body_str = f"{desiered_name_str} joined the chatroom"
-                    else:
-                        rep_body_str = f"{req_item_name} was renamed to {desiered_name_str}"
-
-                    self.callback_handler.run(BackendCallCodes.SEND_SYS_MSG, rep_body_str)
-                    self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_ALL)
-                    self.callback_handler.run(BackendCallCodes.SEND_UPDATE_USERS_LISTENING)
-
-class Sender():
-    def __init__(self, callback_handler_in):
-        self.callback_handler = callback_handler_in
-
-        self.callback_handler.register(BackendCallCodes.SEND_SYS_MSG, self.brodcast_sys_msg) # (message_str)
-        self.callback_handler.register(BackendCallCodes.SEND_CHAT_MSG, self.send_chat_msg) # (_, message_bytearray, origin_user_str, to_socket)
-        self.callback_handler.register(BackendCallCodes.SEND_CHAT_AUDIO, self.send_chat_audio) # (_, audio_bytearray, origin_user_str, to_socket)
 
     def brodcast_sys_msg(self, message_str):
         message_bytearray = handle_socket_util_res(socket_util.serialize(message_str))
         if message_bytearray != None:
             for item in self.roommanager.get_all_items():
                 client_socket, _ = item.data
-                self.send_sys_msg(message_bytearray, client_socket)
+                self.callback_handler.run(BackendCallCodes.SEND_SYS_MSG, message_bytearray, client_socket)
+                #self.sender.send_sys_msg(message_bytearray, client_socket)
 
-    #def brodcast_to(list_to_brodcast, blacklist, function, args):
+class Sender():
+    def __init__(self, callback_handler_in):
+        self.callback_handler = callback_handler_in
+
+        #self.callback_handler.register(BackendCallCodes.SEND_SYS_MSG, self.send_sys_msg) # (message_bytearray, to_socket)
+        #self.callback_handler.register(BackendCallCodes.SEND_CHAT_MSG, self.send_chat_msg) # (_, message_bytearray, origin_user_str, to_socket)
+        #self.callback_handler.register(BackendCallCodes.SEND_CHAT_AUDIO, self.send_chat_audio) # (_, audio_bytearray, origin_user_str, to_socket)
 
     def send_sys_msg(self, message_bytearray, to_socket):
-        handle_socket_util_res(socket_util.send({"type":"sys_msg_dist"}, message_bytearray, to_socket), to_socket)
+        header_obj = {"type":"sys_msg_dist"}
+        handle_socket_util_res(socket_util.send(header_obj, message_bytearray, to_socket), to_socket)
 
-    def send_chat_msg(self, _, body_bytearray, source_name_str, dest_socket):
-        header_obj = dict()
-        header_obj["type"] = "chat_msg_dist"
-        header_obj["from_user"] = source_name_str
+    def send_chat_msg(self, body_bytearray, source_name_str, dest_socket):
+        header_obj = {"type":"chat_msg_dist", "from_user":source_name_str}
         handle_socket_util_res(socket_util.send(header_obj, body_bytearray, dest_socket), dest_socket)
 
-    def send_chat_audio(self, _, audio_bytearray, source_name_str, dest_socket):
-        header_obj = dict()
-        header_obj["type"] = "chat_audio_dist"
-        header_obj["from_user"] = source_name_str
+    def send_chat_audio(self, audio_bytearray, source_name_str, dest_socket):
+        header_obj = {"type":"chat_audio_dist", "from_user":source_name_str}
         handle_socket_util_res(socket_util.send(header_obj, audio_bytearray, dest_socket), dest_socket)
