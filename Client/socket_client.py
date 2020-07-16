@@ -121,12 +121,12 @@ class Processor():
 
     def process(self, data):
         if data != None:
-            header_obj, *body_ba = data
+            header_obj, body_ba = data
 
             if "type" in header_obj:
                 msg_type = header_obj["type"]
 
-                if not self.callback_handler.run(msg_type, *data):
+                if not self.callback_handler.run(msg_type, header_obj, body_ba):
                     self.callback_handler.run(BasicCallCodes.LOG_WARNING, "Unknown message type")
             else:
                 self.callback_handler.run(BasicCallCodes.LOG_WARNING, "Can't process data that doesn't contain message type in header")
