@@ -113,74 +113,68 @@ class ScrollableLabel(ScrollView):
         # by creating a layout and placing two widgets inside it
         # Layout is going to have one collumn and and size_hint_y set to None,
         # so height wo't default to any size (we are going to set it on our own)
-        self.layout = GridLayout(cols=1, size_hint_y=None)
+        self.layout = GridLayout(cols=1, size_hint_y=None, height=0)
+        #self.layout.bind(minimum_height=self.layout.setter('height'))
         self.add_widget(self.layout)
 
         # Now we need two wodgets - Label for chat history and 'artificial' widget below
         # so we can scroll to it every new message and keep new messages visible
         # We want to enable markup, so we can set colors for example
         #self.content = Label(size_hint_y=None, markup=True, font_context="./Client", font_name="unifont-13.0.03")
+        #self.content = Label(size_hint_y=None, markup=True)
         self.content = Label(size_hint_y=None, markup=True)
         self.scroll_to_point = Label()
+
+        self.content.bind(texture_size=lambda label_self, size: f"{self.content.setter('height')(label_self, size[1])} and {self.layout.setter('height')(label_self, size[1])}")
+        #self.content.bind(texture_size=lambda label_self, size: print(f"{label_self}, {size}"))
 
         # We add them to our layout
         self.layout.add_widget(self.content)
         self.layout.add_widget(self.scroll_to_point)
 
-    # Methos called externally to add new message to the chat history
     def add_text_row(self, message, trusted_string=False):
-
-        # First add new line and message itself
         if not trusted_string:
             message = escape_markup(message)
-        self.content.text += '\n' + message
 
-        # Set layout height to whatever height of chat history text is + 15 pixels
-        # (adds a bit of space at teh bottom)
-        # Set chat history label to whatever height of chat history text is
-        # Set width of chat history text to 98 of the label width (adds small margins)
-        self.layout.height = self.content.texture_size[1] + 15
-        self.content.height = self.content.texture_size[1]
-        self.content.text_size = (self.content.width * 0.98, None)
+        if len(self.content.text):
+            self.content.text += '\n'
+        
+        self.content.text += message
+        
+        self.content.text_size = (self.content.width * 0.97, None)
+        #self.content.texture_update()
+        #self.content.height = self.content.texture_size[1]
+        #self.layout.height = self.content.texture_size[1] + 10
 
-        # As we are updating above, text height, so also label and layout height are going to be bigger
-        # than the area we have for this widget. ScrollView is going to add a scroll, but won't
-        # scroll to the botton, nor there is a method that can do that.
-        # That's why we want additional, empty wodget below whole text - just to be able to scroll to it,
-        # so scroll to the bottom of the layout
         self.scroll_to(self.scroll_to_point)
     
     def clear_content(self):
-
-        # First add new line and message itself
         self.content.text = ""
 
-        # Set layout height to whatever height of chat history text is + 15 pixels
-        # (adds a bit of space at teh bottom)
-        # Set chat history label to whatever height of chat history text is
-        # Set width of chat history text to 98 of the label width (adds small margins)
-        self.layout.height = self.content.texture_size[1] + 15
+        self.content.text_size = (self.content.width * 0.97, None)
+        self.content.texture_update()
         self.content.height = self.content.texture_size[1]
-        self.content.text_size = (self.content.width * 0.98, None)
-
-        # As we are updating above, text height, so also label and layout height are going to be bigger
-        # than the area we have for this widget. ScrollView is going to add a scroll, but won't
-        # scroll to the botton, nor there is a method that can do that.
-        # That's why we want additional, empty wodget below whole text - just to be able to scroll to it,
-        # so scroll to the bottom of the layout
+        self.layout.height = self.content.texture_size[1] + 10
+        
         self.scroll_to(self.scroll_to_point)
 
 class ChatPage(GridLayout):
+    same_room_color = "00cc00"
+    sub_room_color = "ff6600"
+    #distant_room_color = "00ffcc"
+    distant_room_color = "8c8c8c"
+    self_user_color = "ffffff"
+
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.active_audio_stream = None
+        self.active_audio_stream = False
         self.users = set()
         self.can_listen = set()
         self.can_speak = set()
         self.structure = list()
 
         self.cols = 1
-        self.rows = 4
 
         self.topgrid = GridLayout(cols=2, rows=1, size_hint_y=9)
         self.history = ScrollableLabel()
@@ -189,21 +183,24 @@ class ChatPage(GridLayout):
         self.topgrid.add_widget(self.users_list)
         self.add_widget(self.topgrid)
         
-        bottom_line = GridLayout(cols=3)
+        self.bottom_line = GridLayout(cols=1)
 
-        self.new_message = MyTextInput(size_hint_x=3, multiline=False)
-        bottom_line.add_widget(self.new_message)
+        self.new_message = MyTextInput(size_hint_x=3, multiline=True, hint_text="Enter text here")
+        self.bottom_line.add_widget(self.new_message)
         self.new_message.enter_function = lambda *args: self.on_text_input_enter(*args)
         
-        self.send = Button(text="Send")
-        self.send.bind(on_press=lambda *args: self.send_message(self.get_str_from_input_field()))
-        bottom_line.add_widget(self.send)
+        #self.send = Button(text="Send")
+        #self.send.bind(on_press=lambda *args: self.send_message(self.get_str_from_input_field()))
+        #self.bottom_line.add_widget(self.send)
 
-        self.set_username_button = Button(text="Set name")
-        self.set_username_button.bind(on_press=self.set_username_trigger)
-        bottom_line.add_widget(self.set_username_button)
+        #self.set_username_button = Button(text="Set name")
+        #self.set_username_button.bind(on_press=self.set_username_trigger)
+        #self.bottom_line.add_widget(self.set_username_button)
 
-        self.add_widget(bottom_line)
+        self.add_widget(self.bottom_line)
+
+        self.helplabel = Label(text="Enter => Send message\nEnter + Alt => Exit Room    Enter + Ctrl => Talk Request    Enter + Shift => Set Username", halign="center")
+        self.add_widget(self.helplabel)
 
         self.pushtotalk = Button(text="Push to talk")
         self.pushtotalk.bind(state=self.push_to_talk)
@@ -236,13 +233,25 @@ class ChatPage(GridLayout):
         return string
 
     def push_to_talk(self, instance, value):
-        print("my current state is {}".format(value))
+        #print("my current state is {}".format(value))
         
         if value is "down":
-            #if self.active_audio_stream is None:
-            callback_handler.run(UserActionCodes.START_AUDIO)
-        elif value is "normal":
-            callback_handler.run(UserActionCodes.STOP_AUDIO)
+            if self.active_audio_stream:
+                callback_handler.run(UserActionCodes.STOP_AUDIO)
+                self.active_audio_stream = False
+            else:
+                self.active_audio_stream = True
+                callback_handler.run(UserActionCodes.START_AUDIO)
+        #elif value is "normal":
+        #    callback_handler.run(UserActionCodes.STOP_AUDIO)
+    
+    def update_audio_status(self, status_bool):
+        self.active_audio_stream = status_bool
+        if status_bool:
+            status_str = "Press to deactivate (Microphone is on)"
+        else:
+            status_str = "Press to activate  (Microphone is off)"
+        self.pushtotalk.text = status_str
     
     def set_username_trigger(self, _):
         self.set_username(self.get_str_from_input_field())
@@ -255,33 +264,36 @@ class ChatPage(GridLayout):
     
     def send_message(self, message_str):
         if message_str:
-            self.history.add_text_row(f"{escape_markup(myapp.connect_page.username.text)}> {escape_markup(message_str)}", True)
+            self.history.add_text_row(f"{self.format_name(myapp.connect_page.username.text)}> {escape_markup(message_str)}", True)
             #self.history.add_text_row(f"[color=dd2020]{myapp.connect_page.username.text}[/color] > {message}")
             callback_handler.run(UserActionCodes.SEND_MSG, message_str)
     
     def new_chat_msg(self, user_str, message_str):
         self.history.add_text_row(f"{self.format_name(user_str)}> {escape_markup(message_str)}", True)
-    
+
     def format_name(self, user_str):
-        can_interact_color = "00cc00" # They are in the same room as you
-        #you_can_only_hear_color = "2e382e" # They are over you in levels
-        you_can_only_speak_to_color = "ff6600" # They are under you in levels
-        no_interaction_color = "00ffcc" # They are outide your scope
-        symbol = ""
-        #8080ff
-        if user_str in self.can_listen:
+        if user_str == myapp.connect_page.username.text:
+            color = ChatPage.self_user_color
+        elif user_str in self.can_listen:
             if user_str in self.can_speak:
-                color = can_interact_color
-                #symbol = symbol + "👂🗣"
+                color = ChatPage.same_room_color
             else:
-                color = you_can_only_speak_to_color
-                #symbol = symbol + "👂🤐"
-        #elif user_str in self.can_speak:
-            #return f"[color={you_can_only_hear_color}]{user_str}[/color]"
+                color = ChatPage.sub_room_color
         else:
-            color = no_interaction_color
-            #symbol = symbol + "❔🗣"
-        return f"[color={color}]" + escape_markup(user_str) + f"{symbol}[/color]"
+            color = ChatPage.distant_room_color
+        return f"[b][color={color}]" + escape_markup(user_str) + "[/color][/b]"
+
+    def format_name_color(self, user_str):
+        if user_str == myapp.connect_page.username.text:
+            color = ChatPage.self_user_color
+        elif user_str in self.can_listen:
+            if user_str in self.can_speak:
+                color = ChatPage.same_room_color
+            else:
+                color = ChatPage.sub_room_color
+        else:
+            color = ChatPage.distant_room_color
+        return color
 
     def send_talk_request(self, person_str):
         callback_handler.run(UserActionCodes.SEND_TALK_REQUEST, person_str)
@@ -301,7 +313,8 @@ class ChatPage(GridLayout):
             self.structure = structure
 
         #❔🗣👂
-        self.users_list.add_text_row("[b]Can hear you [/b]", True)
+        self.users_list.add_text_row(f"[b]([color={ChatPage.same_room_color}]Same Room[/color], [color={ChatPage.sub_room_color}]Subroom[/color], [color={ChatPage.distant_room_color}]Other Room[/color]) [/b]\n", True)
+        self.users_list.add_text_row(f"[b]Can hear you", True)
         for user in self.can_listen:
             self.users_list.add_text_row(self.format_name(str(user)), True)
 
@@ -317,18 +330,26 @@ class ChatPage(GridLayout):
             self.users_list.add_text_row("\n\n[b]Hierarchy[/b]", True)
             self.users_list.add_text_row(self.make_preaty_string(self.structure), True)
             
-    def make_preaty_string(self, structure, level=1):
+    def make_preaty_string(self, structure, indent_in="", color_thing=None):
+        if color_thing == None:
+            color_thing = ChatPage.distant_room_color
         string = ""
         line = "|"
         room_symbol = "v"
-        indent = ""
-        if level > 1:
-            indent += (line + " ") * (level - 1)
+        #if level > 1:
+        #    indent += (line + " ") * (level - 1)
         for entry in structure:
+            #indent = f"[color={self.format_name_color(str(entry))}]" + indent_in + line + " " + "[/color]"
             if not isinstance(entry, list):
-                string = string + indent + self.format_name(str(entry)) + "\n"
+                color_thing = self.format_name_color(str(entry))
+                if color_thing == ChatPage.self_user_color or color_thing == ChatPage.same_room_color:
+                    color_thing = ChatPage.sub_room_color
+                string = string + indent_in + self.format_name(str(entry)) + "\n"
+            #elif entry != myapp.connect_page.username.text:
             else:
-                string = string + indent + room_symbol + "\n" + self.make_preaty_string(entry, level + 1)
+                new_indent = indent_in + f"[color={color_thing}]{line} [/color]"
+                #new_indent = f"[color={self.format_name_color(str(entry))}]" + indent_in + line + " " + "[/color]"
+                string = string + indent_in + f"[color={color_thing}]{room_symbol}[/color]" + "\n" + self.make_preaty_string(entry, new_indent, color_thing)
         return string
 
 class InfoPage(GridLayout):
