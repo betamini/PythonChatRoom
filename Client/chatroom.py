@@ -202,7 +202,7 @@ class ChatPage(GridLayout):
         self.helplabel = Label(text="Enter => Send message\nEnter + Alt => Exit Room    Enter + Ctrl => Talk Request    Enter + Shift => Set Username", halign="center")
         self.add_widget(self.helplabel)
 
-        self.pushtotalk = Button(text="Push to talk")
+        self.pushtotalk = Button(text="Press to activate  (Microphone is off)")
         self.pushtotalk.bind(state=self.push_to_talk)
         self.add_widget(self.pushtotalk)
 
@@ -396,6 +396,8 @@ class MyApp(App):
 
         callback_handler.register(ViewCallCodes.NEW_SYS_MSG, lambda message_str:self.chat_page.history.add_text_row(f"[color=00ff00]{escape_markup(message_str)}[/color]", True))
         callback_handler.register(ViewCallCodes.NEW_CHAT_MSG, self.chat_page.new_chat_msg)
+        
+        callback_handler.register(ViewCallCodes.UPDATE_AUDIO_STATUS, self.chat_page.update_audio_status)
         
         callback_handler.register(ViewCallCodes.UPDATE_USERS_LISTENING, lambda can_listen, can_speak:self.chat_page.update_users_all(None, can_listen, can_speak, None))
         callback_handler.register(ViewCallCodes.UPDATE_USERS_ALL, lambda users_list:self.chat_page.update_users_all(users_list, None, None, None))
