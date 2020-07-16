@@ -220,8 +220,11 @@ class ItemManager():
     def delink_datakey_to_item(self, datakey):
         del self._datakey_to_item[datakey]
 
-    def get_item(self, datakey):
-        return self._datakey_to_item.get(datakey, None)
+    def get_item(self, datakey_or_item):
+        if isinstance(datakey_or_item, Item):
+            return datakey_or_item
+        else:
+            return self._datakey_to_item.get(datakey_or_item, None)
     
     def delete_item(self, item):
         item.datakey = set()
