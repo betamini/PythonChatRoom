@@ -1,3 +1,3 @@
-import Server.server_ui as server
+import Server.server_controller as server
 
-server.run()
+server.main()
