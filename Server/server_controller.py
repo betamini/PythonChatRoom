@@ -2,6 +2,7 @@ import functools
 from enum import Enum, auto
 
 from callback_handler import CallbackHandler
+import Server.room_manager as room_manager
 
 import Server.server_cl as server_cl
 import Server.socket_server as socket_server
@@ -27,10 +28,13 @@ def main():
     
     callback_handler.register(UserActionCodes.MOVE_USER, lambda *args: callback_handler.run(BackendCallCodes.MOVE_USER, *args))
     
-    server_processor = socket_server.Processor(callback_handler)
-    server_action = socket_server.Action(callback_handler, server_processor)
+    itemmanager = room_manager.ItemManager()
+    roommanager = room_manager.RoomManager(itemmanager)
+
     server_sender = socket_server.Sender(callback_handler)
-    #server_back = socket_server.Server(callback_handler)
+    server_action = socket_server.Action(server_sender, callback_handler, itemmanager, roommanager)
+    server_processor = socket_server.Processor(server_action, callback_handler)
+    
     server_ui = server_cl.Server_UI(callback_handler)
     server_ui.start_input_loop()
 
